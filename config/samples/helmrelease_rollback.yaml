@@ -1,0 +1,27 @@
+apiVersion: helm.watchpod.io/v1alpha1
+kind: HelmRelease
+metadata:
+  name: my-app-rollback
+  namespace: default
+spec:
+  releaseName: my-app
+  chart:
+    repository: https://charts.bitnami.com/bitnami
+    name: nginx
+    version: "15.10.3"
+  namespace: default
+
+  # 回退到版本 1
+  targetRevision: "1"
+
+  # 高级操作选项
+  # atomic: true              # 启用原子操作，失败时自动回退
+  # waitTimeout: 300         # 等待超时时间（秒）
+
+  podMonitor:
+    enabled: true
+    endpoint: "http://monitoring-service:8080/api/pod-events"
+    method: "POST"
+    headers:
+      Authorization: "Bearer my-token"
+    prometheusAddr: ":9091"

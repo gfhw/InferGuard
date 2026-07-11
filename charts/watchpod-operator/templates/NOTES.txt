@@ -1,0 +1,24 @@
+Your watchpod-operator has been deployed successfully!
+
+To get started:
+
+1. Check the deployment status:
+   kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "watchpod-operator.name" . }}
+
+2. View the service:
+   kubectl get svc {{ include "watchpod-operator.fullname" . }} -n {{ .Release.Namespace }}
+
+3. Create a sample HelmRelease:
+   kubectl apply -f config/samples/helmrelease_v1alpha1_helmrelease.yaml
+
+4. Check the HelmRelease status:
+   kubectl get helmreleases -n {{ .Release.Namespace }}
+
+5. View operator logs:
+   kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "watchpod-operator.name" . }}
+
+6. Access Prometheus metrics:
+   kubectl port-forward svc/{{ include "watchpod-operator.fullname" . }} 8080:8080
+   curl http://localhost:8080/metrics
+
+For more information, visit: https://github.com/yourusername/watchpod

@@ -1,0 +1,178 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: helmreleases.helm.watchpod.io
+spec:
+  group: helm.watchpod.io
+  names:
+    kind: HelmRelease
+    listKind: HelmReleaseList
+    plural: helmreleases
+    singular: helmrelease
+    shortNames:
+      - hr
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          description: HelmRelease is the Schema for the helmreleases API
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: HelmReleaseSpec defines the desired state of HelmRelease
+              type: object
+              properties:
+                releaseName:
+                  type: string
+                  description: Name of the Helm release
+                chart:
+                  type: object
+                  description: Helm chart specification
+                  properties:
+                    repository:
+                      type: string
+                localPath:
+                  type: string
+                  description: Local path to chart (.tgz or directory), mutually exclusive with repository
+                      description: Helm chart repository URL
+                    name:
+                      type: string
+                      description: Chart name
+                    version:
+                      type: string
+                      description: Chart version
+                  required:
+                    - repository
+                    - name
+                values:
+                  type: object
+                  description: Helm values (free-form YAML/JSON)
+                  x-kubernetes-preserve-unknown-fields: true
+                namespace:
+                  type: string
+                  description: Target namespace for the release
+                version:
+                  type: string
+                targetRevision:
+                  type: string
+                  description: Target revision for rollback
+                forceUpgrade:
+                  type: boolean
+                  description: Force upgrade (ignore conflicts)
+                atomic:
+                  type: boolean
+                  description: Atomic operation (auto rollback on failure)
+                waitTimeout:
+                  type: integer
+                  description: Wait timeout in seconds
+                podMonitor:
+                  type: object
+                  description: Pod monitoring configuration
+                  properties:
+                    enabled:
+                      type: boolean
+                      description: Enable pod monitoring
+                    endpoint:
+                      type: string
+                      description: HTTP endpoint for event push (callback)
+                    method:
+                      type: string
+                      description: HTTP method (POST, PUT, etc.)
+                      default: POST
+                    headers:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: HTTP headers for the push endpoint
+                    prometheusAddr:
+                      type: string
+                      description: Address for Prometheus metrics endpoint
+            status:
+              description: HelmReleaseStatus defines the observed state of HelmRelease
+              type: object
+              properties:
+                phase:
+                  type: string
+                  description: Current phase of the release
+                releaseName:
+                  type: string
+                releaseVersion:
+                  type: integer
+                releaseStatus:
+                  type: string
+                lastAppliedTime:
+                  type: string
+                  format: date-time
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                observedGeneration:
+                  type: integer
+                  format: int64
+                podMonitorReady:
+                  type: boolean
+                revision:
+                  type: integer
+                  description: Current revision number
+                lastTargetRevision:
+                  type: string
+                  description: Last target revision
+                notes:
+                  type: string
+                  description: Helm release notes
+                podStatuses:
+                  type: array
+                  description: Real-time pod runtime status
+                  items:
+                    type: object
+                    properties:
+                      namespace:
+                        type: string
+                      name:
+                        type: string
+                      uid:
+                        type: string
+                      phase:
+                        type: string
+                      nodeName:
+                        type: string
+                      podIP:
+                        type: string
+                      ready:
+                        type: boolean
+                      restart:
+                        type: integer
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Status
+          type: string
+          jsonPath: .status.phase
+        - name: Release
+          type: string
+          jsonPath: .status.releaseName
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

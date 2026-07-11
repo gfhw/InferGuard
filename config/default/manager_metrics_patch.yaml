@@ -1,0 +1,13 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controller-manager
+  labels:
+    app.kubernetes.io/name: watchpod-operator
+spec:
+  template:
+    spec:
+      containers:
+      - name: manager
+        args:
+        - "--metrics-bind-address=127.0.0.1:8080"

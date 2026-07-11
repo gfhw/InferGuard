@@ -1,0 +1,2 @@
+resources:
+- bases/helm.watchpod.io_helmreleases.yaml

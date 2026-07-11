@@ -1,0 +1,31 @@
+apiVersion: helm.watchpod.io/v1alpha1
+kind: HelmRelease
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  releaseName: my-app
+  chart:
+    # 方式一：远程 Helm 仓库
+    repository: https://charts.bitnami.com/bitnami
+    name: nginx
+    version: "15.10.3"
+
+    # 方式二：本地 chart 路径（.tgz 或目录），与上面互斥
+    # localPath: /charts/my-nginx-15.10.3.tgz
+
+  namespace: default
+  values:
+    service:
+      type: ClusterIP
+    replicaCount: 2
+
+  # atomic: true
+  # waitTimeout: 300
+
+  podMonitor:
+    enabled: true
+    endpoint: "http://monitoring-service:8080/api/pod-events"
+    method: "POST"
+    headers:
+      Authorization: "Bearer my-token"
