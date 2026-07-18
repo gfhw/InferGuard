@@ -168,6 +168,24 @@ func (in *HelmReleaseSpec) DeepCopyInto(out *HelmReleaseSpec) {
 			(*out)[key] = val
 		}
 	}
+	if in.Policies != nil {
+		in, out := &in.Policies, &out.Policies
+		*out = make([]PolicySpec, len(*in))
+		copy(*out, *in)
+	}
+	if in.PodMonitor.Filter != nil {
+		in, out := &in.PodMonitor.Filter, &out.PodMonitor.Filter
+		*out = new(EventFilterSpec)
+		**out = **in
+		if (*in).IgnoreEventTypes != nil {
+			(*out).IgnoreEventTypes = make([]string, len((*in).IgnoreEventTypes))
+			copy((*out).IgnoreEventTypes, (*in).IgnoreEventTypes)
+		}
+		if (*in).Phases != nil {
+			(*out).Phases = make([]string, len((*in).Phases))
+			copy((*out).Phases, (*in).Phases)
+		}
+	}
 }
 
 func (in *HelmReleaseStatus) DeepCopyInto(out *HelmReleaseStatus) {
