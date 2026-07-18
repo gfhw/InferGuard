@@ -84,10 +84,10 @@ func (r *HelmReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				r.Status().Update(ctx, updated)
 
 				if deletionRetries >= helmv1alpha1.MaxTransientRetries {
-					watchpodlog.Info("Helm uninstall failed repeatedly, removing finalizer to unblock CR deletion",
+					watchpodlog.Info("Helm uninstall failed after max retries, keeping CR as tombstone. Fix the underlying issue, then delete again.",
 						"release", hr.GetReleaseName(), "retries", deletionRetries, "error", err.Error())
-					controllerutil.RemoveFinalizer(updated, helmReleaseFinalizer)
-					r.Update(ctx, updated)
+					// CR stays with finalizer — it blocks deletion but preserves visibility.
+					// User must fix the Helm release and re-delete the CR.
 					return ctrl.Result{}, nil
 				}
 				return ctrl.Result{}, err
