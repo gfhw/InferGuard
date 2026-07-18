@@ -2,7 +2,6 @@ package policy
 
 import (
 	"context"
-	"time"
 
 	helmv1alpha1 "watchpod/api/v1alpha1"
 )
@@ -17,25 +16,29 @@ type PodState struct {
 }
 
 // RollbackFunc is called when a policy triggers a rollback action.
-type RollbackFunc func(ctx context.Context, releaseName, namespace string, revision int) error
+// Returns the new chart version after rollback.
+type RollbackFunc func(ctx context.Context, releaseName, namespace string, revision int) (newVersion string, err error)
 
 // NotifyFunc is called to send a notification after a policy action.
 type NotifyFunc func(ctx context.Context, releaseName, message string) error
+
+// AfterRollbackFunc is called after a successful policy-triggered rollback to sync CR spec.
+type AfterRollbackFunc func(ctx context.Context, releaseName, namespace, newVersion string) error
 
 // Engine evaluates policies and executes actions.
 type Engine struct {
 	rollback      RollbackFunc
 	notify        NotifyFunc
-	lastRollback  map[string]time.Time // releaseName -> last rollback time
-	cooldown      time.Duration
+	afterRollback AfterRollbackFunc
+	rolledBack    map[string]bool // releaseName -> already rolled back once
 }
 
-func NewEngine(rollbackFn RollbackFunc, notifyFn NotifyFunc) *Engine {
+func NewEngine(rollbackFn RollbackFunc, notifyFn NotifyFunc, afterRollbackFn AfterRollbackFunc) *Engine {
 	return &Engine{
-		rollback:     rollbackFn,
-		notify:       notifyFn,
-		lastRollback: make(map[string]time.Time),
-		cooldown:     5 * time.Minute,
+		rollback:      rollbackFn,
+		notify:        notifyFn,
+		afterRollback: afterRollbackFn,
+		rolledBack:    make(map[string]bool),
 	}
 }
 
@@ -65,22 +68,27 @@ func (e *Engine) Evaluate(ctx context.Context, releaseName, namespace string,
 
 		switch p.Action.Type {
 		case "Rollback":
-			// Cooldown: skip if a rollback was already triggered recently for this release.
-			if last, ok := e.lastRollback[releaseName]; ok && time.Since(last) < e.cooldown {
+			// If already rolled back once for this release and Pods are still crashing,
+			// the problem is not version-specific — stop, don't keep rolling back.
+			if e.rolledBack[releaseName] {
 				result.Triggered = false
-				result.Message = "skipped: within cooldown period"
+				result.Message = "skipped: already rolled back once, manual intervention required"
 				results = append(results, result)
 				continue
 			}
 
 			if e.rollback != nil {
-				if err := e.rollback(ctx, releaseName, namespace, 0); err != nil {
+				newVer, err := e.rollback(ctx, releaseName, namespace, 0)
+				if err != nil {
 					result.ActionTaken = "rollback-failed"
 					result.Message = err.Error()
 				} else {
-					e.lastRollback[releaseName] = time.Now()
+					e.rolledBack[releaseName] = true
 					result.ActionTaken = "rollback"
-					result.Message = "rolled back to previous revision"
+					result.Message = "rolled back to " + newVer
+					if e.afterRollback != nil {
+						e.afterRollback(ctx, releaseName, namespace, newVer)
+					}
 				}
 			}
 		case "Notify":
@@ -110,10 +118,4 @@ func (e *Engine) matchCondition(cond helmv1alpha1.PolicyCondition, pod PodState)
 	default:
 		return false
 	}
-}
-
-// ParseWindow parses a window string like "10m" into a time.Duration.
-func ParseWindow(window string) time.Duration {
-	d, _ := time.ParseDuration(window)
-	return d
 }

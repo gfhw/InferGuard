@@ -16,9 +16,9 @@ import (
 
 	helmv1alpha1 "watchpod/api/v1alpha1"
 	"watchpod/internal/controller"
-	"watchpod/pkg/policy"
 	"watchpod/internal/helm"
 	"watchpod/pkg/podwatch"
+	"watchpod/pkg/policy"
 )
 
 var (
@@ -71,17 +71,38 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Build policy engine with callbacks that use the existing EventSender pipeline.
 	policyEngine := policy.NewEngine(
-		// Rollback callback: delegate to HelmManager.
-		func(ctx context.Context, releaseName, namespace string, revision int) error {
-			mgr := helm.NewManager()
-			return mgr.Rollback(releaseName, namespace, revision, 5*time.Minute)
+		func(ctx context.Context, releaseName, namespace string, revision int) (string, error) {
+			helmMgr := helm.NewManager()
+			if err := helmMgr.Rollback(releaseName, namespace, revision, 5*time.Minute); err != nil {
+				return "", err
+			}
+			rel, err := helmMgr.GetRelease(releaseName, namespace)
+			if err != nil {
+				return "", err
+			}
+			if rel.Chart != nil && rel.Chart.Metadata != nil {
+				return rel.Chart.Metadata.Version, nil
+			}
+			return "", nil
 		},
-		// Notify callback: log for now; webhook handled by existing EventSender.
 		func(ctx context.Context, releaseName, message string) error {
 			setupLog.Info("Policy triggered", "release", releaseName, "message", message)
-			// Policy events are pushed via the per-release EventSender registered on the watcher.
+			return nil
+		},
+		func(ctx context.Context, releaseName, namespace, newVersion string) error {
+			hrList := &helmv1alpha1.HelmReleaseList{}
+			if err := mgr.GetClient().List(ctx, hrList); err != nil {
+				return err
+			}
+			for i := range hrList.Items {
+				if hrList.Items[i].GetReleaseName() == releaseName {
+					fresh := hrList.Items[i].DeepCopy()
+					fresh.Spec.Chart.Version = newVersion
+					fresh.Spec.TargetRevision = ""
+					return mgr.GetClient().Update(ctx, fresh)
+				}
+			}
 			return nil
 		},
 	)
@@ -114,4 +135,3 @@ func main() {
 		os.Exit(1)
 	}
 }
-
