@@ -214,12 +214,12 @@ kubectl get helmrelease my-nginx -o yaml
 
 | 字段 | 说明 |
 |------|------|
-| `type` | ADDED / MODIFIED / DELETED / POLICY_TRIGGERED |
+| `type` | ADDED / MODIFIED / DELETED |
 | `pod` | 实时状态（DELETED 事件为空） |
 | `oldPod` | 仅在 DELETED 事件中出现，Pod 被删除前的最后已知状态 |
 | `releaseName` | 所属 HelmRelease |
 
-策略触发时会额外推送 `type: "POLICY_TRIGGERED"` 事件。
+策略触发后，回滚/通知动作会通过现有 EventSender 执行，后续 Pod 状态变更自然产生对应事件。
 
 ---
 
