@@ -183,7 +183,9 @@ const (
 	PhaseRunning    = "Running"
 	PhaseFailed     = "Failed"
 
-	MaxRetries = 5
+	MaxPermanentRetries = 1
+	MaxTransientRetries = 10
+	MaxRetries           = MaxTransientRetries
 )
 
 const (
@@ -260,7 +262,7 @@ func (in *HelmRelease) GetWaitTimeout() time.Duration {
 	return time.Duration(in.Spec.WaitTimeout) * time.Second
 }
 func (in *HelmRelease) HasRetriesExhausted() bool {
-	return in.Status.RetryCount >= MaxRetries
+	return in.Status.RetryCount >= MaxTransientRetries
 }
 
 func (in *HelmRelease) IsStable() bool {

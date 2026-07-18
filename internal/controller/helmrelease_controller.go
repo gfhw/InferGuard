@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -79,12 +80,12 @@ func (r *HelmReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, nil
 	}
 
-	// Stable: spec unchanged and already Running - nothing to do.
+	// Stable: spec unchanged and already Running — nothing to do.
 	if hr.IsStable() {
 		return ctrl.Result{}, nil
 	}
 
-	// Retries exhausted: permanent failure, stop trying.
+	// Retries exhausted: permanent failure or too many transient failures.
 	if hr.HasRetriesExhausted() {
 		watchpodlog.Info("Retries exhausted, giving up",
 			"name", hr.Name,
@@ -103,7 +104,6 @@ func (r *HelmReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// Attempt reconciliation.
 	if err := r.reconcileHelmRelease(ctx, hr); err != nil {
-		// Calculate exponential backoff: 1s, 2s, 4s, 8s, 16s, ... capped at 10 min.
 		backoff := time.Duration(1<<hr.Status.RetryCount) * time.Second
 		if backoff > maxBackoff {
 			backoff = maxBackoff
@@ -115,7 +115,7 @@ func (r *HelmReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{RequeueAfter: backoff}, nil
 	}
 
-	// Success - no periodic requeue. Wait for spec change to trigger again.
+	// Success — no periodic requeue. Wait for spec change.
 	return ctrl.Result{}, nil
 }
 
@@ -164,6 +164,16 @@ func (r *HelmReleaseReconciler) performInstallOrUpgrade(ctx context.Context, hr 
 			}
 		}
 		r.updateStatusFailed(ctx, hr, err.Error())
+
+		if !isRetryable(err) {
+			watchpodlog.Info("Permanent failure detected, giving up",
+				"release", releaseName, "error", err.Error())
+			updated := hr.DeepCopy()
+			updated.Status.RetryCount = helmv1alpha1.MaxTransientRetries
+			updated.Status.LastFailureMessage = err.Error()
+			r.Status().Update(ctx, updated)
+		}
+
 		return err
 	}
 
@@ -262,6 +272,44 @@ func (r *HelmReleaseReconciler) getValues(hr *helmv1alpha1.HelmRelease) (map[str
 	}
 
 	return values, nil
+}
+
+// isRetryable checks whether a Helm operation error is transient (retry) or permanent (give up immediately).
+func isRetryable(err error) bool {
+	msg := strings.ToLower(err.Error())
+
+	permanent := []string{
+		"values parsing failed",
+		"failed to load chart",
+		"failed to unmarshal",
+		"chart not found",
+		"no chart version found",
+		"failed to render template",
+		"imagepullbackoff",
+		"errimagepull",
+	}
+	for _, p := range permanent {
+		if strings.Contains(msg, p) {
+			return false
+		}
+	}
+
+	transient := []string{
+		"connection refused",
+		"timeout",
+		"context deadline exceeded",
+		"dial tcp",
+		"connection reset",
+		"too many requests",
+		"tls handshake timeout",
+	}
+	for _, t := range transient {
+		if strings.Contains(msg, t) {
+			return true
+		}
+	}
+
+	return true
 }
 
 func (r *HelmReleaseReconciler) finalizeHelmRelease(ctx context.Context, hr *helmv1alpha1.HelmRelease) error {
