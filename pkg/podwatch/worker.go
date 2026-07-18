@@ -128,7 +128,6 @@ func (w *WorkerPool) processOnePod(ctx context.Context, pod *PendingPod) {
 	event := &PodEvent{
 		Type:        pod.EventType,
 		Pod:         liveInfo,
-		OldPod:      pod.Snapshot,
 		Namespace:   pod.Namespace,
 		ReleaseName: pod.ReleaseName,
 		Timestamp:   time.Now().Unix(),
