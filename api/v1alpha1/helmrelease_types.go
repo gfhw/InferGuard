@@ -23,6 +23,9 @@ type HelmReleaseSpec struct {
 
 	// Pod monitor configuration
 	PodMonitor PodMonitorSpec `json:"podMonitor,omitempty"`
+
+	// Policies: auto-remediation rules (e.g. auto-rollback on crash)
+	Policies []PolicySpec `json:"policies,omitempty"`
 }
 
 type ChartSpec struct {
@@ -40,6 +43,35 @@ type PodMonitorSpec struct {
 	Headers  map[string]string `json:"headers,omitempty"`
 
 	PrometheusAddr string `json:"prometheusAddr,omitempty"`
+
+	// Event filter configuration
+	Filter *EventFilterSpec `json:"filter,omitempty"`
+}
+
+type EventFilterSpec struct {
+	OnUnhealthyOnly  bool     `json:"onUnhealthyOnly,omitempty"`
+	MinRestartCount  int32    `json:"minRestartCount,omitempty"`
+	IgnoreEventTypes []string `json:"ignoreEventTypes,omitempty"`
+	Phases           []string `json:"phases,omitempty"`
+}
+
+type PolicyCondition struct {
+	Type      string `json:"type"`
+	Threshold int32  `json:"threshold"`
+	Window    string `json:"window,omitempty"`
+	Scope     string `json:"scope,omitempty"`
+}
+
+type PolicyAction struct {
+	Type     string `json:"type"`
+	Revision int    `json:"revision,omitempty"`
+	Notify   bool   `json:"notify,omitempty"`
+}
+
+type PolicySpec struct {
+	Name      string          `json:"name"`
+	Condition PolicyCondition `json:"condition"`
+	Action    PolicyAction    `json:"action"`
 }
 
 type PodRuntimeStatus struct {

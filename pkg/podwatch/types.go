@@ -1,4 +1,4 @@
-﻿package podwatch
+package podwatch
 
 import (
 	"context"
@@ -108,13 +108,55 @@ type StatusUpdater interface {
 type ReleaseConfig struct {
 	EventSender   *EventSender
 	StatusUpdater StatusUpdater
+	Filter        *ReleaseFilter
 }
 
 // ReleaseRegistry maps releaseName → ReleaseConfig.
+// ReleaseFilter mirrors EventFilterSpec at runtime for per-release event filtering.
+type ReleaseFilter struct {
+	OnUnhealthyOnly  bool
+	MinRestartCount  int32
+	IgnoreEventTypes []string
+	Phases           []string
+}
+
+// ShouldPush returns true if the event passes this release filter.
+func (f *ReleaseFilter) ShouldPush(info PodInfo, eventType PodEventType) bool {
+	if f == nil {
+		return true
+	}
+	if f.OnUnhealthyOnly && info.Ready {
+		return false
+	}
+	if f.MinRestartCount > 0 && info.Restart < f.MinRestartCount {
+		return false
+	}
+	for _, t := range f.IgnoreEventTypes {
+		if string(eventType) == t {
+			return false
+		}
+	}
+	if len(f.Phases) > 0 {
+		found := false
+		for _, p := range f.Phases {
+			if info.Phase == p {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
 type ReleaseRegistry struct {
 	mu      sync.Mutex
 	entries map[string]*ReleaseConfig
 }
+
+// ReleaseFilter mirrors EventFilterSpec at runtime for per-release event filtering.
 
 func NewReleaseRegistry() *ReleaseRegistry {
 	return &ReleaseRegistry{

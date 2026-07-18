@@ -235,6 +235,16 @@ func (r *HelmReleaseReconciler) managePodMonitor(ctx context.Context, hr *helmv1
 		return nil
 	}
 
+	var releaseFilter *podwatch.ReleaseFilter
+	if hr.Spec.PodMonitor.Filter != nil {
+		releaseFilter = &podwatch.ReleaseFilter{
+			OnUnhealthyOnly:  hr.Spec.PodMonitor.Filter.OnUnhealthyOnly,
+			MinRestartCount:  hr.Spec.PodMonitor.Filter.MinRestartCount,
+			IgnoreEventTypes: hr.Spec.PodMonitor.Filter.IgnoreEventTypes,
+			Phases:           hr.Spec.PodMonitor.Filter.Phases,
+		}
+	}
+
 	r.Watcher.RegisterRelease(releaseName, &podwatch.ReleaseConfig{
 		EventSender: podwatch.NewEventSenderWithConfig(
 			hr.GetPodMonitorEndpoint(),
@@ -246,6 +256,7 @@ func (r *HelmReleaseReconciler) managePodMonitor(ctx context.Context, hr *helmv1
 			crNamespace: hr.Namespace,
 			crName:      hr.Name,
 		},
+		Filter: releaseFilter,
 	})
 
 	r.releaseNames[key] = releaseName

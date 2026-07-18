@@ -9,13 +9,15 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"watchpod/pkg/log"
+	"watchpod/pkg/policy"
 )
 
 type WorkerPool struct {
-	queue     *PodEventQueue
-	k8sClient kubernetes.Interface
-	collector *PodCollector
-	releases  *ReleaseRegistry
+	queue        *PodEventQueue
+	k8sClient    kubernetes.Interface
+	collector    *PodCollector
+	releases     *ReleaseRegistry
+	policyEngine *policy.Engine
 }
 
 func NewWorkerPool(
@@ -23,12 +25,14 @@ func NewWorkerPool(
 	k8sClient kubernetes.Interface,
 	collector *PodCollector,
 	releases *ReleaseRegistry,
+	policyEngine *policy.Engine,
 ) *WorkerPool {
 	return &WorkerPool{
-		queue:     queue,
-		k8sClient: k8sClient,
-		collector: collector,
-		releases:  releases,
+		queue:        queue,
+		k8sClient:    k8sClient,
+		collector:    collector,
+		releases:     releases,
+		policyEngine: policyEngine,
 	}
 }
 
@@ -71,6 +75,11 @@ func (w *WorkerPool) processOnePod(ctx context.Context, pod *PendingPod) {
 
 	// Informer already told us it's deleted — trust it, no API call needed.
 	if pod.EventType == PodEventDeleted {
+		// Apply per-release event filter.
+		if releaseCfg.Filter != nil && !releaseCfg.Filter.ShouldPush(pod.PodInfo, PodEventDeleted) {
+			return
+		}
+
 		event := &PodEvent{
 			Type:        PodEventDeleted,
 			OldPod:      pod.Snapshot,
@@ -111,6 +120,11 @@ func (w *WorkerPool) processOnePod(ctx context.Context, pod *PendingPod) {
 	// Pod exists — push event with API's current state.
 	liveInfo := ConvertToPodInfo(livePod)
 
+	// Apply per-release event filter.
+	if releaseCfg.Filter != nil && !releaseCfg.Filter.ShouldPush(liveInfo, pod.EventType) {
+		return
+	}
+
 	event := &PodEvent{
 		Type:        pod.EventType,
 		Pod:         liveInfo,
@@ -128,6 +142,18 @@ func (w *WorkerPool) processOnePod(ctx context.Context, pod *PendingPod) {
 
 	w.pushAndUpdateMetrics(ctx, releaseCfg, event)
 	w.updateCRStatus(ctx, releaseCfg, pod.ReleaseName, liveInfo, event.Type)
+
+	// Policy engine: evaluate auto-remediation rules.
+	if w.policyEngine != nil {
+		w.policyEngine.Evaluate(ctx, pod.ReleaseName, pod.Namespace,
+			policy.PodState{
+				Namespace: liveInfo.Namespace,
+				Name:      liveInfo.Name,
+				Phase:     liveInfo.Phase,
+				Ready:     liveInfo.Ready,
+				Restart:   liveInfo.Restart,
+			}, nil)
+	}
 }
 
 func (w *WorkerPool) pushAndUpdateMetrics(ctx context.Context, releaseCfg *ReleaseConfig, event *PodEvent) {

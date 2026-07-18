@@ -1,6 +1,7 @@
-﻿package main
+package main
 
 import (
+	"context"
 	"flag"
 	"os"
 	"time"
@@ -15,6 +16,8 @@ import (
 
 	helmv1alpha1 "watchpod/api/v1alpha1"
 	"watchpod/internal/controller"
+	"watchpod/pkg/policy"
+	"watchpod/internal/helm"
 	"watchpod/pkg/podwatch"
 )
 
@@ -67,6 +70,20 @@ func main() {
 		setupLog.Error(err, "unable to start global pod watcher")
 		os.Exit(1)
 	}
+
+	policyEngine := policy.NewEngine(
+		// Rollback callback: delegate to HelmManager.
+		func(ctx context.Context, releaseName, namespace string, revision int) error {
+			mgr := helm.NewManager()
+			return mgr.Rollback(releaseName, namespace, revision, 5*time.Minute)
+		},
+		// Notify callback: log for now; webhook handled by existing EventSender.
+		func(ctx context.Context, releaseName, message string) error {
+			setupLog.Info("Policy triggered", "release", releaseName, "message", message)
+			return nil
+		},
+	)
+	watcher.SetPolicyEngine(policyEngine)
 
 	reconciler := controller.NewHelmReleaseReconciler(
 		mgr.GetClient(),

@@ -13,6 +13,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	"watchpod/pkg/log"
+	"watchpod/pkg/policy"
 )
 
 type GlobalPodWatcher struct {
@@ -28,7 +29,9 @@ type GlobalPodWatcher struct {
 	collector  *PodCollector
 	filter     *Filter
 
-	releases *ReleaseRegistry
+	releases      *ReleaseRegistry
+
+	policyEngine  *policy.Engine
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -80,7 +83,7 @@ func (w *GlobalPodWatcher) Start(ctx context.Context) error {
 
 	w.collector = NewPodCollector(w.podInformer, w.filter)
 
-	w.workerPool = NewWorkerPool(w.queue, w.k8sClient, w.collector, w.releases)
+	w.workerPool = NewWorkerPool(w.queue, w.k8sClient, w.collector, w.releases, w.policyEngine)
 
 	factory.Start(w.ctx.Done())
 
@@ -122,6 +125,10 @@ func (w *GlobalPodWatcher) Stop() {
 func (w *GlobalPodWatcher) RegisterRelease(releaseName string, cfg *ReleaseConfig) {
 	w.releases.Register(releaseName, cfg)
 	log.Info("Release registered", "release", releaseName)
+}
+
+func (w *GlobalPodWatcher) SetPolicyEngine(engine *policy.Engine) {
+	w.policyEngine = engine
 }
 
 func (w *GlobalPodWatcher) UnregisterRelease(releaseName string) {
