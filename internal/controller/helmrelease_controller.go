@@ -69,7 +69,27 @@ func (r *HelmReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// Handle deletion.
 	if !hr.ObjectMeta.DeletionTimestamp.IsZero() {
 		if controllerutil.ContainsFinalizer(hr, helmReleaseFinalizer) {
+			// Reset retry counter on first deletion attempt (it may be stale from install failures).
+			deletionRetries := hr.Status.RetryCount
+			if hr.Status.Phase != "UninstallFailed" {
+				deletionRetries = 0
+			}
+
 			if err := r.finalizeHelmRelease(ctx, hr); err != nil {
+				deletionRetries++
+				updated := hr.DeepCopy()
+				updated.Status.RetryCount = deletionRetries
+				updated.Status.Phase = "UninstallFailed"
+				updated.Status.LastFailureMessage = err.Error()
+				r.Status().Update(ctx, updated)
+
+				if deletionRetries >= helmv1alpha1.MaxTransientRetries {
+					watchpodlog.Info("Helm uninstall failed repeatedly, removing finalizer to unblock CR deletion",
+						"release", hr.GetReleaseName(), "retries", deletionRetries, "error", err.Error())
+					controllerutil.RemoveFinalizer(updated, helmReleaseFinalizer)
+					r.Update(ctx, updated)
+					return ctrl.Result{}, nil
+				}
 				return ctrl.Result{}, err
 			}
 			controllerutil.RemoveFinalizer(hr, helmReleaseFinalizer)

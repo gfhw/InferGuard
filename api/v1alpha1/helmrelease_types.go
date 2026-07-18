@@ -213,7 +213,8 @@ const (
 	PhaseInstalling = "Installing"
 	PhaseUpgrading  = "Upgrading"
 	PhaseRunning    = "Running"
-	PhaseFailed     = "Failed"
+	PhaseFailed         = "Failed"
+	PhaseUninstallFailed = "UninstallFailed"
 
 	MaxPermanentRetries = 1
 	MaxTransientRetries = 10
