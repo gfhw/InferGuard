@@ -94,7 +94,6 @@ type HelmReleaseStatus struct {
 	ReleaseVersion     int                `json:"releaseVersion,omitempty"`
 	ReleaseStatus      string             `json:"releaseStatus,omitempty"`
 	LastAppliedTime    *metav1.Time       `json:"lastAppliedTime,omitempty"`
-	Conditions         []metav1.Condition `json:"conditions,omitempty"`
 	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
 	PodMonitorReady    bool               `json:"podMonitorReady,omitempty"`
 
@@ -194,11 +193,6 @@ func (in *HelmReleaseStatus) DeepCopyInto(out *HelmReleaseStatus) {
 		in, out := &in.LastAppliedTime, &out.LastAppliedTime
 		*out = new(metav1.Time)
 		**out = **in
-	}
-	if in.Conditions != nil {
-		in, out := &in.Conditions, &out.Conditions
-		*out = make([]metav1.Condition, len(*in))
-		copy(*out, *in)
 	}
 	if in.PodStatuses != nil {
 		in, out := &in.PodStatuses, &out.PodStatuses
@@ -323,37 +317,4 @@ func (in *HelmRelease) IsStable() bool {
 	return in.Status.Phase == PhaseRunning &&
 		in.Status.ObservedGeneration == in.Generation &&
 		in.Status.LastAttemptedGeneration == in.Generation
-}
-
-
-func SetCondition(conditions *[]metav1.Condition, condition metav1.Condition) {
-	existingIdx := -1
-	for i, c := range *conditions {
-		if c.Type == condition.Type {
-			existingIdx = i
-			break
-		}
-	}
-
-	if existingIdx >= 0 {
-		existing := &(*conditions)[existingIdx]
-		if existing.Status == condition.Status &&
-			existing.Reason == condition.Reason &&
-			existing.Message == condition.Message {
-			return
-		}
-		condition.LastTransitionTime = existing.LastTransitionTime
-		(*conditions)[existingIdx] = condition
-	} else {
-		*conditions = append(*conditions, condition)
-	}
-}
-
-func GetCondition(conditions []metav1.Condition, conditionType string) *metav1.Condition {
-	for i := range conditions {
-		if conditions[i].Type == conditionType {
-			return &conditions[i]
-		}
-	}
-	return nil
 }
