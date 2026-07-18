@@ -151,7 +151,7 @@ func (w *WorkerPool) processOnePod(ctx context.Context, pod *PendingPod) {
 				Phase:     liveInfo.Phase,
 				Ready:     liveInfo.Ready,
 				Restart:   liveInfo.Restart,
-			}, nil)
+			}, releaseCfg.Policies)
 	}
 }
 
@@ -161,10 +161,14 @@ func (w *WorkerPool) pushAndUpdateMetrics(ctx context.Context, releaseCfg *Relea
 
 	if releaseCfg.EventSender != nil {
 		if err := releaseCfg.EventSender.Send(pushCtx, *event); err != nil {
+			podName := event.Pod.Name
+			if podName == "" {
+				podName = event.OldPod.Name
+			}
 			log.ErrorE(err, "Failed to push pod event, will retry on next resync",
 				"eventType", event.Type,
 				"release", event.ReleaseName,
-				"pod", event.Pod.Name)
+				"pod", podName)
 		}
 	}
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 
+	helmv1alpha1 "watchpod/api/v1alpha1"
+
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -109,6 +111,7 @@ type ReleaseConfig struct {
 	EventSender   *EventSender
 	StatusUpdater StatusUpdater
 	Filter        *ReleaseFilter
+	Policies      []helmv1alpha1.PolicySpec
 }
 
 // ReleaseRegistry maps releaseName → ReleaseConfig.

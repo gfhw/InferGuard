@@ -163,15 +163,18 @@ func (r *HelmReleaseReconciler) performInstallOrUpgrade(ctx context.Context, hr 
 					"release", releaseName, "namespace", releaseNs)
 			}
 		}
-		r.updateStatusFailed(ctx, hr, err.Error())
-
 		if !isRetryable(err) {
 			watchpodlog.Info("Permanent failure detected, giving up",
 				"release", releaseName, "error", err.Error())
+			// Combine status update: set failed + mark retries exhausted.
 			updated := hr.DeepCopy()
+			updated.Status.Phase = helmv1alpha1.PhaseFailed
+			updated.Status.LastAttemptedGeneration = hr.Generation
 			updated.Status.RetryCount = helmv1alpha1.MaxTransientRetries
 			updated.Status.LastFailureMessage = err.Error()
 			r.Status().Update(ctx, updated)
+		} else {
+			r.updateStatusFailed(ctx, hr, err.Error())
 		}
 
 		return err
@@ -209,16 +212,19 @@ func (r *HelmReleaseReconciler) performRollback(ctx context.Context, hr *helmv1a
 		return err
 	}
 
-	// Align CR spec with the rolled-back state so the next reconciliation
-	// won't upgrade back to the previous chart version.
-	updated := hr.DeepCopy()
-	updated.Spec.TargetRevision = ""
-	if rel.Chart != nil && rel.Chart.Metadata != nil {
-		updated.Spec.Chart.Version = rel.Chart.Metadata.Version
-	}
-	if err := r.Update(ctx, updated); err != nil {
-		watchpodlog.ErrorE(err, "Failed to update spec after rollback",
-			"release", releaseName)
+	// Fetch a fresh copy of the CR (status was already updated above, which changed resourceVersion).
+	// Then align the spec with the rolled-back state.
+	fresh := &helmv1alpha1.HelmRelease{}
+	if err := r.Get(ctx, types.NamespacedName{Namespace: hr.Namespace, Name: hr.Name}, fresh); err != nil {
+		watchpodlog.ErrorE(err, "Failed to re-fetch CR after rollback", "release", releaseName)
+	} else {
+		fresh.Spec.TargetRevision = ""
+		if rel.Chart != nil && rel.Chart.Metadata != nil {
+			fresh.Spec.Chart.Version = rel.Chart.Metadata.Version
+		}
+		if err := r.Update(ctx, fresh); err != nil {
+			watchpodlog.ErrorE(err, "Failed to update spec after rollback", "release", releaseName)
+		}
 	}
 
 	return r.managePodMonitor(ctx, hr)
@@ -257,6 +263,7 @@ func (r *HelmReleaseReconciler) managePodMonitor(ctx context.Context, hr *helmv1
 			crName:      hr.Name,
 		},
 		Filter: releaseFilter,
+		Policies: hr.Spec.Policies,
 	})
 
 	r.releaseNames[key] = releaseName
