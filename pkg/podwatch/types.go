@@ -110,8 +110,9 @@ type StatusUpdater interface {
 type ReleaseConfig struct {
 	EventSender   *EventSender
 	StatusUpdater StatusUpdater
-	Filter        *ReleaseFilter
-	Policies      []helmv1alpha1.PolicySpec
+	Filter          *ReleaseFilter
+	Policies        []helmv1alpha1.PolicySpec
+	AutoRemediation bool
 }
 
 // ReleaseRegistry maps releaseName → ReleaseConfig.

@@ -43,6 +43,9 @@ type PodMonitorSpec struct {
 	Headers  map[string]string `json:"headers,omitempty"`
 
 	PrometheusAddr string `json:"prometheusAddr,omitempty"`
+	// AutoRemediation enables policy-driven auto-rollback when pods crash.
+	// Defaults to false -- pod status is only written to CR, no automatic rollback.
+	AutoRemediation bool `json:"autoRemediation,omitempty"`
 
 	// Event filter configuration
 	Filter *EventFilterSpec `json:"filter,omitempty"`

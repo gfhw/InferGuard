@@ -247,6 +247,9 @@ func (r *HelmReleaseReconciler) performRollback(ctx context.Context, hr *helmv1a
 		}
 	}
 
+	// Mark as rolled back so policy engine doesn not auto-rollback again.
+	r.Watcher.MarkReleaseRolledBack(releaseName)
+
 	return r.managePodMonitor(ctx, hr)
 }
 
@@ -284,6 +287,7 @@ func (r *HelmReleaseReconciler) managePodMonitor(ctx context.Context, hr *helmv1
 		},
 		Filter: releaseFilter,
 		Policies: hr.Spec.Policies,
+		AutoRemediation: hr.Spec.PodMonitor.AutoRemediation,
 	})
 
 	r.releaseNames[key] = releaseName

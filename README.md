@@ -139,6 +139,7 @@ spec:
   podMonitor:
     enabled: true
     endpoint: "https://alerts.mycompany.com/webhook"
+    autoRemediation: true  # ????????? false??? CR ???
     filter:
       onUnhealthyOnly: true
       minRestartCount: 3

@@ -142,8 +142,8 @@ func (w *WorkerPool) processOnePod(ctx context.Context, pod *PendingPod) {
 	w.pushAndUpdateMetrics(ctx, releaseCfg, event)
 	w.updateCRStatus(ctx, releaseCfg, pod.ReleaseName, liveInfo, event.Type)
 
-	// Policy engine: evaluate auto-remediation rules.
-	if w.policyEngine != nil {
+	// Policy engine: evaluate auto-remediation rules (only if user explicitly enabled).
+	if w.policyEngine != nil && releaseCfg.AutoRemediation {
 		w.policyEngine.Evaluate(ctx, pod.ReleaseName, pod.Namespace,
 			policy.PodState{
 				Namespace: liveInfo.Namespace,
