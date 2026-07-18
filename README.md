@@ -217,6 +217,38 @@ kubectl get helmrelease my-nginx -o yaml
 
 ---
 
+
+## 业界对比
+
+| | Watchpod | Flux CD | ArgoCD | Robusta | kube-state-metrics |
+|------|:---:|:---:|:---:|:---:|:---:|
+| Helm Release CRD | ✅ | ✅ | ✅（Application + Helm） | — | — |
+| Pod 实时状态 Push | ✅ | — | — | ✅ | —（Pull only） |
+| 策略自愈引擎 | ✅ | ✅（remediation） | ✅（auto-sync） | ✅（playbooks） | — |
+| Per-release 过滤 | ✅ | — | — | — | — |
+| CR Status 回写 Pod 状态 | ✅ | — | — | — | — |
+| 部署复杂度 | 单二进制 | 4+ 组件 | 3+ 组件 | Helm + SaaS | 单 Deployment |
+| GitOps | — | ✅ | ✅ | — | — |
+| 学习成本 | 低 | 高 | 高 | 中 | 低 |
+
+### 各工具定位
+
+**Flux CD**：功能最全的 CNCF 毕业项目，生产验证充分。但需要装 Source Controller、Kustomize Controller、Helm Controller、Notification Controller 四个组件。Flux 帮你管 Helm 但不盯 Pod 运行时状态——部署完告诉你 "reconciled"，Pod 崩了 Flux 不知道。
+
+**ArgoCD**：UI 漂亮、GitOps 标杆。但它盯的是 Kubernetes 资源的同步状态（Deployment desired == actual），不盯 Pod 的运行时指标（restart 次数、是否 OOMKilled）。Pod 崩了 ArgoCD 看到的 Deployment 仍然是 healthy——spec 没变。
+
+**Robusta**：专做 Pod 监控 + 自动化排障，开箱即用的 playbook 很丰富。但它不管理 Helm 生命周期——你还需要另外的东西部署 chart。
+
+**kube-state-metrics**：Prometheus 生态基础组件，只暴露指标不推送事件。需要自己搭 Prometheus + Alertmanager + Grafana 才能完成 Watchpod 一条 webhook 做到的事。
+
+### Watchpod 的定位
+
+Watchpod 不是 Flux/ArgoCD 的替代品，而是它们的互补品——管完部署后接着盯 Pod、Filter 噪音、自动回滚。核心差异：
+
+- **集成度**：Helm 生命周期 + Pod 监控 + 自愈策略在一个二进制里，声明一个 CR 全自动
+- **粒度**：盯的是 Pod 运行时状态（restart、phase、ready），不是 Deployment spec 漂移
+- **轻量**：没有 GitOps 包袱，适合不想引入 Flux 复杂度的中小团队
+- **策略引擎**：直接在 Pod 事件链路上插入判断点，复用现有 EventSender 和 HelmManager
 ## 项目结构
 
 ```
