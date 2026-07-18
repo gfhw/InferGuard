@@ -24,12 +24,19 @@ type NotifyFunc func(ctx context.Context, releaseName, message string) error
 
 // Engine evaluates policies and executes actions.
 type Engine struct {
-	rollback RollbackFunc
-	notify   NotifyFunc
+	rollback      RollbackFunc
+	notify        NotifyFunc
+	lastRollback  map[string]time.Time // releaseName -> last rollback time
+	cooldown      time.Duration
 }
 
 func NewEngine(rollbackFn RollbackFunc, notifyFn NotifyFunc) *Engine {
-	return &Engine{rollback: rollbackFn, notify: notifyFn}
+	return &Engine{
+		rollback:     rollbackFn,
+		notify:       notifyFn,
+		lastRollback: make(map[string]time.Time),
+		cooldown:     5 * time.Minute,
+	}
 }
 
 // PolicyResult records the outcome of a policy evaluation.
@@ -58,16 +65,20 @@ func (e *Engine) Evaluate(ctx context.Context, releaseName, namespace string,
 
 		switch p.Action.Type {
 		case "Rollback":
-			rev := p.Action.Revision
-			if rev == 0 {
-				rev = -1 // helm rollback 0 = previous revision
+			// Cooldown: skip if a rollback was already triggered recently for this release.
+			if last, ok := e.lastRollback[releaseName]; ok && time.Since(last) < e.cooldown {
+				result.Triggered = false
+				result.Message = "skipped: within cooldown period"
+				results = append(results, result)
+				continue
 			}
-			// For helm rollback, use 0 to mean "last successful"
+
 			if e.rollback != nil {
 				if err := e.rollback(ctx, releaseName, namespace, 0); err != nil {
 					result.ActionTaken = "rollback-failed"
 					result.Message = err.Error()
 				} else {
+					e.lastRollback[releaseName] = time.Now()
 					result.ActionTaken = "rollback"
 					result.Message = "rolled back to previous revision"
 				}
