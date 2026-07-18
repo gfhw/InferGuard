@@ -71,6 +71,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Build policy engine with callbacks that use the existing EventSender pipeline.
 	policyEngine := policy.NewEngine(
 		// Rollback callback: delegate to HelmManager.
 		func(ctx context.Context, releaseName, namespace string, revision int) error {
@@ -80,6 +81,7 @@ func main() {
 		// Notify callback: log for now; webhook handled by existing EventSender.
 		func(ctx context.Context, releaseName, message string) error {
 			setupLog.Info("Policy triggered", "release", releaseName, "message", message)
+			// Policy events are pushed via the per-release EventSender registered on the watcher.
 			return nil
 		},
 	)

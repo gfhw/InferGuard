@@ -145,7 +145,7 @@ func (w *WorkerPool) processOnePod(ctx context.Context, pod *PendingPod) {
 
 	// Policy engine: evaluate auto-remediation rules.
 	if w.policyEngine != nil {
-		w.policyEngine.Evaluate(ctx, pod.ReleaseName, pod.Namespace,
+		results := w.policyEngine.Evaluate(ctx, pod.ReleaseName, pod.Namespace,
 			policy.PodState{
 				Namespace: liveInfo.Namespace,
 				Name:      liveInfo.Name,
@@ -153,6 +153,24 @@ func (w *WorkerPool) processOnePod(ctx context.Context, pod *PendingPod) {
 				Ready:     liveInfo.Ready,
 				Restart:   liveInfo.Restart,
 			}, nil)
+
+		for _, result := range results {
+			if result.Triggered && releaseCfg.EventSender != nil {
+				policyEvent := PodEvent{
+					Type:        PodEventType("POLICY_TRIGGERED"),
+					Pod:         liveInfo,
+					OldPod:      pod.Snapshot,
+					Namespace:   pod.Namespace,
+					ReleaseName: pod.ReleaseName,
+					Timestamp:   time.Now().Unix(),
+				}
+				if err := releaseCfg.EventSender.Send(ctx, policyEvent); err != nil {
+					log.ErrorE(err, "Failed to push policy event",
+						"policy", result.PolicyName,
+						"action", result.ActionTaken)
+				}
+			}
+		}
 	}
 }
 
