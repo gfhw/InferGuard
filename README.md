@@ -207,13 +207,19 @@ kubectl get helmrelease my-nginx -o yaml
     "namespace": "production", "name": "my-nginx-xxx",
     "phase": "Running", "ready": true, "restart": 0
   },
-  "oldPod": {"phase": "Pending", "ready": false, "restart": 0},
   "releaseName": "my-nginx",
   "timestamp": 1720456789
 }
 ```
 
-策略触发时会额外推送 POLICY_TRIGGERED 事件。
+| 字段 | 说明 |
+|------|------|
+| `type` | ADDED / MODIFIED / DELETED / POLICY_TRIGGERED |
+| `pod` | 实时状态（DELETED 事件为空） |
+| `oldPod` | 仅在 DELETED 事件中出现，Pod 被删除前的最后已知状态 |
+| `releaseName` | 所属 HelmRelease |
+
+策略触发时会额外推送 `type: "POLICY_TRIGGERED"` 事件。
 
 ---
 
