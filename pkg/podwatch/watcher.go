@@ -131,6 +131,12 @@ func (w *GlobalPodWatcher) SetPolicyEngine(engine *policy.Engine) {
 	w.policyEngine = engine
 }
 
+func (w *GlobalPodWatcher) MarkReleaseRolledBack(releaseName string) {
+	if w.policyEngine != nil {
+		w.policyEngine.MarkRolledBack(releaseName)
+	}
+}
+
 func (w *GlobalPodWatcher) UnregisterRelease(releaseName string) {
 	w.releases.Unregister(releaseName)
 	log.Info("Release unregistered", "release", releaseName)

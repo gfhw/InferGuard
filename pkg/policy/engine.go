@@ -107,6 +107,12 @@ func (e *Engine) Evaluate(ctx context.Context, releaseName, namespace string,
 	return results
 }
 
+// MarkRolledBack tells the engine that a rollback was performed (user or policy initiated).
+// This prevents further auto-rollbacks for this release.
+func (e *Engine) MarkRolledBack(releaseName string) {
+	e.rolledBack[releaseName] = true
+}
+
 func (e *Engine) matchCondition(cond helmv1alpha1.PolicyCondition, pod PodState) bool {
 	switch cond.Type {
 	case "PodRestart":
