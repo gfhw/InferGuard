@@ -166,7 +166,8 @@ func (c *PodCollector) Collect(ch chan<- prometheus.Metric) {
 
 				for _, r := range results {
 					if r.ActionTaken == "notify" && releaseCfg.EventSender != nil {
-						_ = releaseCfg.EventSender.SendRaw(context.TODO(), r.AlertBody)
+						body := expandAlertVars(r.AlertBody, info, releaseName, inferenceState)
+						_ = releaseCfg.EventSender.SendRaw(context.TODO(), body)
 					}
 				}
 			}

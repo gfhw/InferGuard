@@ -156,7 +156,8 @@ func (w *WorkerPool) processOnePod(ctx context.Context, pod *PendingPod) {
 		// Push Notify results via EventSender (raw user-defined JSON).
 		for _, r := range results {
 			if r.ActionTaken == "notify" && releaseCfg.EventSender != nil {
-				if err := releaseCfg.EventSender.SendRaw(ctx, r.AlertBody); err != nil {
+				body := expandAlertVars(r.AlertBody, liveInfo, pod.ReleaseName, nil)
+				if err := releaseCfg.EventSender.SendRaw(ctx, body); err != nil {
 					log.ErrorE(err, "Failed to push policy alert",
 						"policy", r.PolicyName, "release", pod.ReleaseName)
 				}
