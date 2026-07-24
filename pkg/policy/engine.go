@@ -19,11 +19,12 @@ type PodState struct {
 
 // InferenceState holds AI-specific metrics for policy evaluation.
 type InferenceState struct {
-	Namespace       string
-	Name            string
-	LatencyP99Ms    float64
-	GPUCachePct     float64
-	RequestsWaiting int32
+	Namespace        string
+	Name             string
+	LatencySumSec    float64
+	LatencyCount     float64
+	GPUCachePct      float64
+	RequestsWaiting  int32
 }
 
 // RollbackFunc is called when a policy triggers a rollback action.
@@ -181,7 +182,12 @@ func (e *Engine) matchCondition(cond helmv1alpha1.PolicyCondition, pod PodState)
 func (e *Engine) matchInferenceCondition(cond helmv1alpha1.PolicyCondition, infer InferenceState) bool {
 	switch cond.Type {
 	case "InferenceLatency":
-		return infer.LatencyP99Ms >= float64(cond.Threshold)
+		// avg latency in ms: (sum_sec / count) * 1000
+		if infer.LatencyCount <= 0 {
+			return false
+		}
+		avgMs := (infer.LatencySumSec / infer.LatencyCount) * 1000
+		return avgMs >= float64(cond.Threshold)
 	case "GPUCacheUsage":
 		return infer.GPUCachePct >= float64(cond.Threshold)
 	case "InferenceQueueDepth":

@@ -226,12 +226,13 @@ func (c *PodCollector) scrapeAndEmit(ch chan<- prometheus.Metric, info PodInfo, 
 				inferenceLatencyDesc, prometheus.CounterValue, val,
 				info.Namespace, info.Name, releaseName, lookupLabel(labels, "model_name"),
 			)
-			state.LatencyP99Ms = val / 1000 // store as ms for policy threshold comparison
+			state.LatencySumSec = val
 		case strings.HasPrefix(metricName, "vllm:time_per_output_token_seconds_count"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceLatencyCountDesc, prometheus.CounterValue, val,
 				info.Namespace, info.Name, releaseName, lookupLabel(labels, "model_name"),
 			)
+			state.LatencyCount = val
 		case strings.HasPrefix(metricName, "vllm:time_to_first_token_seconds_sum"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceTTFTDesc, prometheus.CounterValue, val,

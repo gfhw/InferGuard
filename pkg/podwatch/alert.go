@@ -25,7 +25,12 @@ func expandAlertVars(alertBody string, info PodInfo, releaseName string, state *
 	s = strings.ReplaceAll(s, "${pod_restart}", strconv.Itoa(int(info.Restart)))
 
 	if state != nil {
-		s = strings.ReplaceAll(s, "${inference_latency_ms}", strconv.FormatFloat(state.LatencyP99Ms, 'f', 1, 64))
+		if state.LatencyCount > 0 {
+			avgMs := (state.LatencySumSec / state.LatencyCount) * 1000
+			s = strings.ReplaceAll(s, "${inference_latency_ms}", strconv.FormatFloat(avgMs, 'f', 1, 64))
+		} else {
+			s = strings.ReplaceAll(s, "${inference_latency_ms}", "0")
+		}
 		s = strings.ReplaceAll(s, "${gpu_cache_pct}", strconv.FormatFloat(state.GPUCachePct, 'f', 1, 64))
 	}
 
