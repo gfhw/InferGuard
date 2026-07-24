@@ -157,12 +157,27 @@ func (c *PodCollector) Collect(ch chan<- prometheus.Metric) {
 		inferenceState := c.scrapeAndEmit(ch, info, releaseName)
 		c.eventsProcessed++
 
-		// Evaluate AI-metrics-based policies (e.g. InferenceLatency > threshold -> rollback)
+		// Evaluate AI-metrics-based policies (e.g. InferenceLatency > threshold -> rollback/notify)
 		if c.policyEngine != nil && inferenceState != nil {
 			releaseCfg := releases[releaseName]
 			if releaseCfg != nil && releaseCfg.AutoRemediation {
-				c.policyEngine.EvaluateInference(context.TODO(),
+				results := c.policyEngine.EvaluateInference(context.TODO(),
 					releaseName, info.Namespace, *inferenceState, releaseCfg.Policies)
+
+				for _, r := range results {
+					if r.ActionTaken == "notify" && releaseCfg.EventSender != nil {
+						alertEvent := PodEvent{
+							Type:         PodEventModified,
+							Pod:          info,
+							Namespace:    info.Namespace,
+							ReleaseName:  releaseName,
+							Timestamp:    time.Now().Unix(),
+							AlertTitle:   r.PolicyName,
+							AlertMessage: r.Message,
+						}
+						_ = releaseCfg.EventSender.Send(context.TODO(), alertEvent)
+					}
+				}
 			}
 		}
 	}

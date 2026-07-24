@@ -69,12 +69,14 @@ type PendingPod struct {
 }
 
 type PodEvent struct {
-	Type        PodEventType
-	Pod         PodInfo
-	OldPod      PodInfo
-	Namespace   string
-	ReleaseName string
-	Timestamp   int64
+	Type         PodEventType `json:"type"`
+	Pod          PodInfo      `json:"pod,omitempty"`
+	OldPod       PodInfo      `json:"oldPod,omitempty"`
+	Namespace    string       `json:"namespace,omitempty"`
+	ReleaseName  string       `json:"releaseName,omitempty"`
+	Timestamp    int64        `json:"timestamp"`
+	AlertTitle   string       `json:"alertTitle,omitempty"`
+	AlertMessage string       `json:"alertMessage,omitempty"`
 }
 
 type PodStatus struct {
