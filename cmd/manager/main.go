@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"flag"
 	"os"
 	"time"
@@ -12,6 +13,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	helmrelease "helm.sh/helm/v3/pkg/release"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	helmv1alpha1 "github.com/gfhw/inferguard/api/v1alpha1"
@@ -74,10 +76,18 @@ func main() {
 	policyEngine := policy.NewEngine(
 		func(ctx context.Context, releaseName, namespace string, revision int) (string, error) {
 			helmMgr := helm.NewManager()
+			var rel *helmrelease.Release
+			rel, err = helmMgr.GetRelease(releaseName, namespace)
+			if err != nil {
+				return "", fmt.Errorf("cannot check release: %w", err)
+			}
+			if rel.Version <= 1 {
+				return "", fmt.Errorf("no previous revision (current: %d)", rel.Version)
+			}
 			if err := helmMgr.Rollback(releaseName, namespace, revision, 5*time.Minute); err != nil {
 				return "", err
 			}
-			rel, err := helmMgr.GetRelease(releaseName, namespace)
+			rel, err = helmMgr.GetRelease(releaseName, namespace)
 			if err != nil {
 				return "", err
 			}

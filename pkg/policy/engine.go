@@ -3,6 +3,7 @@ package policy
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	helmv1alpha1 "github.com/gfhw/inferguard/api/v1alpha1"
@@ -145,6 +146,10 @@ func (e *Engine) evaluate(ctx context.Context, releaseName, namespace string,
 				if err != nil {
 					result.ActionTaken = "rollback-failed"
 					result.Message = err.Error()
+					// No previous revision — mark as done, no point retrying.
+					if strings.Contains(err.Error(), "no previous revision") {
+						e.rolledBack[releaseName] = true
+					}
 				} else {
 					e.rolledBack[releaseName] = true
 					result.ActionTaken = "rollback"
