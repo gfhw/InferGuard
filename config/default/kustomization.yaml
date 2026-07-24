@@ -1,6 +1,6 @@
-namespace: watchpod-operator-system
+namespace: inferguard-system
 
-namePrefix: watchpod-operator-
+namePrefix: inferguard-
 
 resources:
 - ../crd

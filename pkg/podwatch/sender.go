@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"watchpod/pkg/log"
+	"github.com/gfhw/inferguard/pkg/log"
 )
 
 type EventSender struct {

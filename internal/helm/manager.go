@@ -234,7 +234,7 @@ func (m *Manager) downloadChart(repoURL, chartName, chartVersion string) (string
 
 	r := repo.NewFile()
 	r.Add(&repo.Entry{
-		Name: "watchpod-repo",
+		Name: "inferguard-repo",
 		URL:  repoURL,
 	})
 	if err := r.WriteFile(repoFile, 0644); err != nil {
@@ -242,7 +242,7 @@ func (m *Manager) downloadChart(repoURL, chartName, chartVersion string) (string
 	}
 
 	chartRepo, err := repo.NewChartRepository(
-		&repo.Entry{Name: "watchpod-repo", URL: repoURL},
+		&repo.Entry{Name: "inferguard-repo", URL: repoURL},
 		getter.All(&cli.EnvSettings{}),
 	)
 	if err != nil {

@@ -1,6 +1,6 @@
 apiVersion: v2
-name: watchpod-operator
-description: A Helm chart for Watchpod - Kubernetes Operator for Helm Release Management and Pod Monitoring
+name: inferguard
+description: A Helm chart for InferGuard - Kubernetes Operator for Helm Release Management and Pod Monitoring
 type: application
 version: 0.1.0
 appVersion: "1.0.0"
@@ -11,5 +11,5 @@ keywords:
   - monitoring
   - prometheus
 maintainers:
-  - name: watchpod
+  - name: inferguard
     email: your-email@example.com

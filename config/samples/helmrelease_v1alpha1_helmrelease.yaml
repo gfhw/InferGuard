@@ -1,4 +1,4 @@
-apiVersion: helm.watchpod.io/v1alpha1
+apiVersion: inferguard.io/v1alpha1
 kind: HelmRelease
 metadata:
   name: my-app
@@ -6,12 +6,12 @@ metadata:
 spec:
   releaseName: my-app
   chart:
-    # ·½Ê½Ò»£ºÔ¶³Ì Helm ²Ö¿â
+    # æ–¹å¼ä¸€ï¼šè¿œç¨‹ Helm ä»“åº“
     repository: https://charts.bitnami.com/bitnami
     name: nginx
     version: "15.10.3"
 
-    # ·½Ê½¶ş£º±¾µØ chart Â·¾¶£¨.tgz »òÄ¿Â¼£©£¬ÓëÉÏÃæ»¥³â
+    # æ–¹å¼äºŒï¼šæœ¬åœ° chart è·¯å¾„ï¼ˆ.tgz æˆ–ç›®å½•ï¼‰ï¼Œä¸ä¸Šé¢äº’æ–¥
     # localPath: /charts/my-nginx-15.10.3.tgz
 
   namespace: default

@@ -5,7 +5,7 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
-  - helm.watchpod.io
+  - inferguard.io
   resources:
   - helmreleases
   verbs:
@@ -17,13 +17,13 @@ rules:
   - update
   - watch
 - apiGroups:
-  - helm.watchpod.io
+  - inferguard.io
   resources:
   - helmreleases/finalizers
   verbs:
   - update
 - apiGroups:
-  - helm.watchpod.io
+  - inferguard.io
   resources:
   - helmreleases/status
   verbs:

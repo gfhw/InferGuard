@@ -1,4 +1,4 @@
-module watchpod
+module github.com/gfhw/inferguard
 
 go 1.21
 

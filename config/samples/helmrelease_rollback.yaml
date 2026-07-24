@@ -1,4 +1,4 @@
-apiVersion: helm.watchpod.io/v1alpha1
+apiVersion: inferguard.io/v1alpha1
 kind: HelmRelease
 metadata:
   name: my-app-rollback

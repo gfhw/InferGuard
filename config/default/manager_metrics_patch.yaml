@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: controller-manager
   labels:
-    app.kubernetes.io/name: watchpod-operator
+    app.kubernetes.io/name: inferguard
 spec:
   template:
     spec:

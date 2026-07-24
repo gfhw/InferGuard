@@ -1,7 +1,7 @@
 replicaCount: 1
 
 image:
-  repository: watchpod-operator
+  repository: inferguard
   pullPolicy: IfNotPresent
   tag: "latest"
 

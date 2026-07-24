@@ -18,14 +18,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	ctrlLog "sigs.k8s.io/controller-runtime/pkg/log"
 
-	helmv1alpha1 "watchpod/api/v1alpha1"
-	"watchpod/internal/helm"
-	watchpodlog "watchpod/pkg/log"
-	"watchpod/pkg/podwatch"
+	helmv1alpha1 "github.com/gfhw/inferguard/api/v1alpha1"
+	"github.com/gfhw/inferguard/internal/helm"
+	inferguardlog "github.com/gfhw/inferguard/pkg/log"
+	"github.com/gfhw/inferguard/pkg/podwatch"
 )
 
 const (
-	helmReleaseFinalizer = "helm.watchpod.io/finalizer"
+	helmReleaseFinalizer = "inferguard.io/finalizer"
 	maxBackoff           = 10 * time.Minute
 )
 
@@ -84,7 +84,7 @@ func (r *HelmReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				r.Status().Update(ctx, updated)
 
 				if deletionRetries >= helmv1alpha1.MaxTransientRetries {
-					watchpodlog.Info("Helm uninstall failed after max retries, keeping CR as tombstone. Fix the underlying issue, then delete again.",
+					inferguardlog.Info("Helm uninstall failed after max retries, keeping CR as tombstone. Fix the underlying issue, then delete again.",
 						"release", hr.GetReleaseName(), "retries", deletionRetries, "error", err.Error())
 					// CR stays with finalizer — it blocks deletion but preserves visibility.
 					// User must fix the Helm release and re-delete the CR.
@@ -107,7 +107,7 @@ func (r *HelmReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// Retries exhausted: permanent failure or too many transient failures.
 	if hr.HasRetriesExhausted() {
-		watchpodlog.Info("Retries exhausted, giving up",
+		inferguardlog.Info("Retries exhausted, giving up",
 			"name", hr.Name,
 			"retryCount", hr.Status.RetryCount,
 			"lastError", hr.Status.LastFailureMessage)
@@ -128,7 +128,7 @@ func (r *HelmReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		if backoff > maxBackoff {
 			backoff = maxBackoff
 		}
-		watchpodlog.Info("Reconciliation failed, retrying with backoff",
+		inferguardlog.Info("Reconciliation failed, retrying with backoff",
 			"name", hr.Name,
 			"retryCount", hr.Status.RetryCount,
 			"backoff", backoff)
@@ -176,15 +176,15 @@ func (r *HelmReleaseReconciler) performInstallOrUpgrade(ctx context.Context, hr 
 	}
 	if err != nil {
 		if hr.ShouldAtomic() && existing != nil {
-			watchpodlog.Info("Atomic upgrade failed, rolling back",
+			inferguardlog.Info("Atomic upgrade failed, rolling back",
 				"release", releaseName, "namespace", releaseNs, "error", err.Error())
 			if rollbackErr := r.HelmManager.Rollback(releaseName, releaseNs, 0, hr.GetWaitTimeout()); rollbackErr != nil {
-				watchpodlog.ErrorE(rollbackErr, "Failed to rollback after atomic upgrade failure",
+				inferguardlog.ErrorE(rollbackErr, "Failed to rollback after atomic upgrade failure",
 					"release", releaseName, "namespace", releaseNs)
 			}
 		}
 		if !isRetryable(err) {
-			watchpodlog.Info("Permanent failure detected, giving up",
+			inferguardlog.Info("Permanent failure detected, giving up",
 				"release", releaseName, "error", err.Error())
 			// Combine status update: set failed + mark retries exhausted.
 			updated := hr.DeepCopy()
@@ -212,7 +212,7 @@ func (r *HelmReleaseReconciler) performRollback(ctx context.Context, hr *helmv1a
 	releaseNs := hr.GetReleaseNamespace()
 	targetRevision := hr.GetTargetRevision()
 
-	watchpodlog.Info("Performing rollback",
+	inferguardlog.Info("Performing rollback",
 		"release", releaseName, "namespace", releaseNs, "targetRevision", targetRevision)
 
 	r.updateStatusPhase(ctx, hr, helmv1alpha1.PhaseInstalling)
@@ -236,14 +236,14 @@ func (r *HelmReleaseReconciler) performRollback(ctx context.Context, hr *helmv1a
 	// Then align the spec with the rolled-back state.
 	fresh := &helmv1alpha1.HelmRelease{}
 	if err := r.Get(ctx, types.NamespacedName{Namespace: hr.Namespace, Name: hr.Name}, fresh); err != nil {
-		watchpodlog.ErrorE(err, "Failed to re-fetch CR after rollback", "release", releaseName)
+		inferguardlog.ErrorE(err, "Failed to re-fetch CR after rollback", "release", releaseName)
 	} else {
 		fresh.Spec.TargetRevision = ""
 		if rel.Chart != nil && rel.Chart.Metadata != nil {
 			fresh.Spec.Chart.Version = rel.Chart.Metadata.Version
 		}
 		if err := r.Update(ctx, fresh); err != nil {
-			watchpodlog.ErrorE(err, "Failed to update spec after rollback", "release", releaseName)
+			inferguardlog.ErrorE(err, "Failed to update spec after rollback", "release", releaseName)
 		}
 	}
 
@@ -378,7 +378,7 @@ func (r *HelmReleaseReconciler) updateStatusPhase(ctx context.Context, hr *helmv
 	updated := hr.DeepCopy()
 	updated.Status.Phase = phase
 	if err := r.Status().Update(ctx, updated); err != nil {
-		watchpodlog.ErrorE(err, "Failed to update status phase", "phase", phase)
+		inferguardlog.ErrorE(err, "Failed to update status phase", "phase", phase)
 	}
 }
 
@@ -420,7 +420,7 @@ func (r *HelmReleaseReconciler) updateStatusFailed(ctx context.Context, hr *helm
 	updated.Status.RetryCount = hr.Status.RetryCount + 1
 	updated.Status.LastFailureMessage = message
 	if err := r.Status().Update(ctx, updated); err != nil {
-		watchpodlog.ErrorE(err, "Failed to update status")
+		inferguardlog.ErrorE(err, "Failed to update status")
 	}
 }
 
@@ -442,7 +442,7 @@ func (u *crStatusUpdater) UpdatePodStatus(ctx context.Context, releaseName strin
 	key := types.NamespacedName{Namespace: u.crNamespace, Name: u.crName}
 	if err := u.client.Get(ctx, key, hr); err != nil {
 		if errors.IsNotFound(err) {
-			watchpodlog.Info("HelmRelease not found, skipping status update",
+			inferguardlog.Info("HelmRelease not found, skipping status update",
 				"namespace", u.crNamespace, "name", u.crName)
 			return nil
 		}

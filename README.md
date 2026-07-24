@@ -1,4 +1,4 @@
-# Watchpod
+# InferGuard
 
 将 Helm 的声明式能力原生融入 Kubernetes Operator 模式——通过一个 CRD 控制 Chart 的全生命周期，部署后实时监控 Pod 健康状态，异常时自动回滚保障业务可用性。
 
@@ -12,7 +12,7 @@
 
 Helm 是 Kubernetes 的包管理器——但它工作在 Kubernetes 的声明式模型之外。你跑完 `helm install`，Helm 就退出了。Pod 有没有真的健康运行、升级失败后要不要回滚、回滚完了谁告诉你结果——这些 Helm 都不管。
 
-Watchpod 把 Helm 拉进了 Kubernetes 的 Operator 模型：**Helm Release 不再是 CLI 的一次性操作，而是 CR 的期望状态**。创建 CR → 自动部署，改 values → 自动升级，Pod 崩了 → 自动回滚。从部署、监控到自愈，一个 CRD 全闭环。
+InferGuard 把 Helm 拉进了 Kubernetes 的 Operator 模型：**Helm Release 不再是 CLI 的一次性操作，而是 CR 的期望状态**。创建 CR → 自动部署，改 values → 自动升级，Pod 崩了 → 自动回滚。从部署、监控到自愈，一个 CRD 全闭环。
 
 ---
 
@@ -51,13 +51,13 @@ Watchpod 把 Helm 拉进了 Kubernetes 的 Operator 模型：**Helm Release 不�
 
 ## 设计哲学
 
-**Helm 负责"部署"，Watchpod 负责"管到底"。**
+**Helm 负责"部署"，InferGuard 负责"管到底"。**
 
-Helm 的 `--wait --atomic --timeout` 只管到"部署这个动作成功"，不管部署后 Pod 的实际运行状态。Watchpod 延伸了这条链路：
+Helm 的 `--wait --atomic --timeout` 只管到"部署这个动作成功"，不管部署后 Pod 的实际运行状态。InferGuard 延伸了这条链路：
 
 ```
 Helm：         install → deployed（结束了）
-Watchpod：     install → deployed → 持续 watch Pod → 不健康 → 自动 rollback
+InferGuard：     install → deployed → 持续 watch Pod → 不健康 → 自动 rollback
 ```
 
 这不是替代 Helm，而是把 Helm 嵌入 Kubernetes 的 reconcile 循环——让 Helm Release 像 Deployment 一样具备自愈能力。
@@ -101,7 +101,7 @@ Watchpod：     install → deployed → 持续 watch Pod → 不健康 → 自�
 
 ## 业界对比
 
-| | Watchpod | Flux CD | ArgoCD | Robusta | Helm CLI |
+| | InferGuard | Flux CD | ArgoCD | Robusta | Helm CLI |
 |------|:---:|:---:|:---:|:---:|:---:|
 | Helm Release CRD | ✅ | ✅ | ✅（Application） | — | — |
 | 升级失败自动回滚 | ✅ | ✅ | ✅ | — | `--atomic` |
@@ -112,7 +112,7 @@ Watchpod：     install → deployed → 持续 watch Pod → 不健康 → 自�
 | 部署复杂度 | 单二进制 | 4+ 组件 | 3+ 组件 | Helm + SaaS | 单 CLI |
 | 学习成本 | 低 | 高 | 高 | 中 | 低 |
 
-**差异化定位：** Watchpod 不是 Flux/ArgoCD 的替代品——它不做 GitOps。它填补的是 Helm CLI 和 GitOps 工具之间的空白：以 CR 为操作界面、以 Pod 运行时状态为判断依据、以自动回滚为兜底，轻量、自洽、开箱即用。
+**差异化定位：** InferGuard 不是 Flux/ArgoCD 的替代品——它不做 GitOps。它填补的是 Helm CLI 和 GitOps 工具之间的空白：以 CR 为操作界面、以 Pod 运行时状态为判断依据、以自动回滚为兜底，轻量、自洽、开箱即用。
 
 ---
 
@@ -121,7 +121,7 @@ Watchpod：     install → deployed → 持续 watch Pod → 不健康 → 自�
 ### 完整示例
 
 ```yaml
-apiVersion: helm.watchpod.io/v1alpha1
+apiVersion: inferguard.io/v1alpha1
 kind: HelmRelease
 metadata:
   name: my-nginx
@@ -179,7 +179,7 @@ spec:
 
 ```bash
 # 部署 Operator
-kubectl apply -f charts/watchpod-operator/templates/crd.yaml
+kubectl apply -f charts/inferguard/templates/crd.yaml
 kubectl apply -k config/default
 
 # 创建 HelmRelease
@@ -218,10 +218,10 @@ kubectl get helmrelease my-nginx -o yaml
 
 | 指标 | Labels | 说明 |
 |------|--------|------|
-| `watchpod_pod_info` | namespace, name, release, phase, node, pod_ip | Pod 元数据 |
-| `watchpod_pod_ready` | namespace, name, release | 1=Ready, 0=Not |
-| `watchpod_pod_restart_total` | namespace, name, release | 累计 restart |
-| `watchpod_pod_events_total` | event_type | 已处理事件计数 |
+| `inferguard_pod_info` | namespace, name, release, phase, node, pod_ip | Pod 元数据 |
+| `inferguard_pod_ready` | namespace, name, release | 1=Ready, 0=Not |
+| `inferguard_pod_restart_total` | namespace, name, release | 累计 restart |
+| `inferguard_pod_events_total` | event_type | 已处理事件计数 |
 
 ---
 
@@ -237,7 +237,7 @@ pkg/
   podwatch/                Pod 监控：watcher、queue、worker、sender、collector、filter
   policy/                  策略引擎：条件匹配 + 动作执行
   log/                     zap 日志
-charts/watchpod-operator/  Helm Chart 部署资源
+charts/inferguard/  Helm Chart 部署资源
 ```
 
 ## 技术栈
@@ -246,4 +246,4 @@ charts/watchpod-operator/  Helm Chart 部署资源
 
 ---
 
-> **Watchpod：让 Helm Release 像 Deployment 一样自愈。**
+> **InferGuard：让 Helm Release 像 Deployment 一样自愈。**

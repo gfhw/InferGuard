@@ -1,12 +1,12 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "watchpod-operator.fullname" . }}-manager-role
+  name: {{ include "inferguard.fullname" . }}-manager-role
   labels:
-    {{- include "watchpod-operator.labels" . | nindent 4 }}
+    {{- include "inferguard.labels" . | nindent 4 }}
 rules:
 - apiGroups:
-  - helm.watchpod.io
+  - inferguard.io
   resources:
   - helmreleases
   verbs:
@@ -18,13 +18,13 @@ rules:
   - update
   - watch
 - apiGroups:
-  - helm.watchpod.io
+  - inferguard.io
   resources:
   - helmreleases/finalizers
   verbs:
   - update
 - apiGroups:
-  - helm.watchpod.io
+  - inferguard.io
   resources:
   - helmreleases/status
   verbs:
@@ -74,14 +74,14 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ include "watchpod-operator.fullname" . }}-manager-rolebinding
+  name: {{ include "inferguard.fullname" . }}-manager-rolebinding
   labels:
-    {{- include "watchpod-operator.labels" . | nindent 4 }}
+    {{- include "inferguard.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ include "watchpod-operator.fullname" . }}-manager-role
+  name: {{ include "inferguard.fullname" . }}-manager-role
 subjects:
 - kind: ServiceAccount
-  name: {{ include "watchpod-operator.serviceAccountName" . }}
+  name: {{ include "inferguard.serviceAccountName" . }}
   namespace: {{ .Release.Namespace }}

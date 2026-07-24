@@ -14,11 +14,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	helmv1alpha1 "watchpod/api/v1alpha1"
-	"watchpod/internal/controller"
-	"watchpod/internal/helm"
-	"watchpod/pkg/podwatch"
-	"watchpod/pkg/policy"
+	helmv1alpha1 "github.com/gfhw/inferguard/api/v1alpha1"
+	"github.com/gfhw/inferguard/internal/controller"
+	"github.com/gfhw/inferguard/internal/helm"
+	"github.com/gfhw/inferguard/pkg/podwatch"
+	"github.com/gfhw/inferguard/pkg/policy"
 )
 
 var (
@@ -52,7 +52,7 @@ func main() {
 		Scheme:                 scheme,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "watchpod-helm-operator",
+		LeaderElectionID:       "inferguard-helm-operator",
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")

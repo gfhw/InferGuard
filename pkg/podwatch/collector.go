@@ -12,11 +12,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 
-	"watchpod/pkg/log"
+	"github.com/gfhw/inferguard/pkg/log"
 )
 
 const (
-	metricsNamespace = "watchpod"
+	metricsNamespace = "inferguard"
 )
 
 var (

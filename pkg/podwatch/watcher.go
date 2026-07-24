@@ -12,8 +12,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 
-	"watchpod/pkg/log"
-	"watchpod/pkg/policy"
+	"github.com/gfhw/inferguard/pkg/log"
+	"github.com/gfhw/inferguard/pkg/policy"
 )
 
 type GlobalPodWatcher struct {

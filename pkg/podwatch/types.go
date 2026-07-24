@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	helmv1alpha1 "watchpod/api/v1alpha1"
+	helmv1alpha1 "github.com/gfhw/inferguard/api/v1alpha1"
 
 	corev1 "k8s.io/api/core/v1"
 )

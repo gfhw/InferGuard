@@ -8,8 +8,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
-	"watchpod/pkg/log"
-	"watchpod/pkg/policy"
+	"github.com/gfhw/inferguard/pkg/log"
+	"github.com/gfhw/inferguard/pkg/policy"
 )
 
 type WorkerPool struct {

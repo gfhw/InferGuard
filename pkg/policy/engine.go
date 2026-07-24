@@ -3,7 +3,7 @@ package policy
 import (
 	"context"
 
-	helmv1alpha1 "watchpod/api/v1alpha1"
+	helmv1alpha1 "github.com/gfhw/inferguard/api/v1alpha1"
 )
 
 // PodState holds the snapshot needed for policy evaluation.
