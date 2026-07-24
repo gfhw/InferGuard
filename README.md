@@ -1,4 +1,4 @@
-﻿# InferGuard
+# InferGuard
 
 AI 推理 Pod 全生命周期管理 Operator —— 声明式部署、实时监控告警、Prometheus 指标出口。一个 CRD 管到底。
 
@@ -23,10 +23,11 @@ Kubernetes 上部署 AI 推理模型不仅仅是 helm install。模型 Pod 要�
 | 操作 | 方式 |
 |------|------|
 | 部署模型 | 创建 CR -> Operator 执行 helm install |
-| 升级 | 修改 alues 或 chart.version -> 自动 helm upgrade |
-| 回滚 | 设置 	argetRevision -> helm rollback，成功后自动对齐 spec |
+| 升级 | 修改 values 或 chart.version -> 自动 helm upgrade |
+| 回滚 | 设置 targetRevision -> helm rollback，成功后自动对齐 spec(version + values) |
 | 卸载 | 删除 CR -> Finalizer 触发 helm uninstall，释放 GPU 资源 |
 | 本地 Chart | chart.localPath 直接加载 .tgz 或目录 |
+| Atomic 升级 | atomic: true -> 升级失败自动 rollback |
 
 ### AI 推理实时监控
 
@@ -37,8 +38,9 @@ Kubernetes 上部署 AI 推理模型不仅仅是 helm install。模型 Pod 要�
 ### 智能策略告警
 
 - **条件检测**: 声明式定义 Pod 状态条件(PodRestart、PodNotReady、PodCrash)和 AI 指标条件(InferenceLatency、GPUCacheUsage、InferenceQueueDepth)
-- **触发计数**: 支持 	riggerCount，条件连续满足 N 次才告警，避免抖动
-- **自定义告警体**: lertBody 支持占位符 ${release_name} ${pod_name} ${namespace} ${pod_phase} ${pod_restart} ${pod_ip} ${inference_latency_ms} ${gpu_cache_pct}
+- **触发计数**: 支持 triggerCount，条件连续满足 N 次才告警，避免抖动
+- **自定义告警体**: alertBody 支持占位符 ${release_name} ${pod_name} ${namespace} ${pod_phase} ${pod_restart} ${pod_ip} ${inference_latency_ms} ${gpu_cache_pct}
+- **设计理念**: 策略只做告警推送，不做自动回滚——生产环境下机器决策风险太高，人工介入是最佳实践
 
 ### Per-release 精细化控制
 
@@ -48,33 +50,33 @@ Kubernetes 上部署 AI 推理模型不仅仅是 helm install。模型 Pod 要�
 
 ---
 
-## 架构图
+## 架构
 
-`
+```
 ModelRelease CR ---> Controller (Reconcile)
-                       ├─ Helm SDK: install/upgrade/rollback/uninstall
-                       ├─ 错误分类: permanent vs transient
-                       └─ 指数退避重试
+                       +-- Helm SDK: install/upgrade/rollback/uninstall
+                       +-- 错误分类: permanent vs transient
+                       +-- 指数退避重试(最多10次)
 
 SharedInformer (watch Helm Pods)
-  └─ PodEventQueue (UID 去重, 非阻塞通知)
-      └─ WorkerPool (单 Worker 串行)
-          ├─ API Server 实时 Get(非 Informer 缓存)
-          ├─ Webhook Push(PodEvent JSON + 策略告警)
-          ├─ CR Status 回写
-          └─ Policy Engine -> 策略告警推送
+  +-- PodEventQueue (UID 去重, 非阻塞通知)
+      +-- WorkerPool (单 Worker 串行)
+          +-- API Server 实时 Get(非 Informer 缓存)
+          +-- Webhook Push(PodEvent JSON + 策略告警)
+          +-- CR Status 回写
+          +-- Policy Engine -> 条件计数 + 告警推送
 
 Prometheus Collector (主动 scrape, 不依赖 Informer 缓存)
-  └─ HTTP GET podIP:8000/metrics (vLLM/TGI/SGLang)
-      └─ 解析 vLLM 指标 -> 以 inferguard_ 前缀重新暴露
-          └─ 同时评估 AI 策略(InferenceLatency 等)
-`
+  +-- HTTP GET podIP:8000/metrics (vLLM/TGI/SGLang)
+      +-- 解析 vLLM 指标 -> 以 inferguard_ 前缀重新暴露
+          +-- 同时评估 AI 策略(InferenceLatency 等)
+```
 
 ---
 
 ## CR 示例
 
-`yaml
+```yaml
 apiVersion: inferguard.io/v1alpha1
 kind: ModelRelease
 metadata:
@@ -89,6 +91,7 @@ spec:
   values:
     model: "meta-llama/Meta-Llama-3-8B-Instruct"
     replicas: 2
+  # atomic: true  # 升级失败自动回滚
   podMonitor:
     enabled: true
     endpoint: "https://alerts.example.com/webhook"
@@ -104,9 +107,9 @@ spec:
         triggerCount: 3
         alertBody: |
           {
-            "release": "",
-            "pod": "",
-            "latency_ms": ,
+            "release": "${release_name}",
+            "pod": "${pod_name}",
+            "latency_ms": ${inference_latency_ms},
             "severity": "warning"
           }
     - name: pod-crash-alert
@@ -116,12 +119,12 @@ spec:
         triggerCount: 1
         alertBody: |
           {
-            "release": "",
-            "pod": "",
-            "phase": "",
+            "release": "${release_name}",
+            "pod": "${pod_name}",
+            "phase": "${pod_phase}",
             "severity": "critical"
           }
-`
+```
 
 ---
 
@@ -138,7 +141,7 @@ Prometheus 只暴露 AI 推理指标，Pod 状态指标请走 Webhook Push 或 C
 | inferguard_inference_requests_total | namespace, pod, release, model | 成功请求总数 |
 | inferguard_inference_requests_running | namespace, pod, release | 当前正在处理的请求数 |
 | inferguard_inference_requests_waiting | namespace, pod, release | 排队等待的请求数 |
-| inferguard_inference_tokens_total | namespace, pod, release, kind | Token 总数(kind=prompt\|generation) |
+| inferguard_inference_tokens_total | namespace, pod, release, kind | Token 总数(kind=prompt|generation) |
 | inferguard_inference_gpu_cache_usage_percent | namespace, pod, release | GPU KV-Cache 使用率 |
 
 **工作原理**: Prometheus scrape /metrics -> InferGuard Collector 对每个已注册的推理 Pod 执行 HTTP GET podIP:8000/metrics -> 解析 vLLM 原生指标 -> 以 inferguard_ 前缀重新暴露。零额外 exporter，零 Informer 缓存依赖。
@@ -147,7 +150,7 @@ Prometheus 只暴露 AI 推理指标，Pod 状态指标请走 Webhook Push 或 C
 
 ## Push 事件格式
 
-`json
+```json
 {
   "type": "MODIFIED",
   "pod": {
@@ -161,9 +164,9 @@ Prometheus 只暴露 AI 推理指标，Pod 状态指标请走 Webhook Push 或 C
   "releaseName": "llama-3-8b",
   "timestamp": 1720456789
 }
-`
+```
 
-策略告警使用用户自定义 JSON 格式(通过 lertBody 定义)，支持占位符变量替换。
+策略告警使用用户自定义 JSON 格式(通过 alertBody 定义)，支持占位符变量替换。
 
 ---
 
@@ -176,12 +179,13 @@ Prometheus 只暴露 AI 推理指标，Pod 状态指标请走 Webhook Push 或 C
 | **单 Worker 串行消费** | 无需锁，无并发竞争，天然有序 |
 | **Prometheus 主动 scrape** | 不依赖 Informer 缓存，直接从推理引擎抓取指标 |
 | **策略只告警不自愈** | 生产环境机器决策风险太高，人决策更安全。告警推送 + 人工介入是最佳实践 |
+| **回滚后全量对齐 spec** | 回滚后同步 chart.version + values + ObservedGeneration，避免 spec 与实际状态脱节 |
 
 ---
 
 ## 快速开始
 
-`ash
+```bash
 # 1. 安装 CRD
 make install
 
@@ -197,32 +201,32 @@ kubectl describe modelrelease llama-3-8b -n production
 
 # 5. 查看 Prometheus 指标
 curl http://localhost:9090/metrics | grep inferguard_
-`
+```
 
 ---
 
 ## 项目结构
 
-`
-├── api/v1alpha1/             # CRD 定义(ModelRelease)
-├── cmd/manager/              # Operator 入口
-├── config/samples/           # CR 示例
-├── internal/
-│   ├── controller/           # Reconcile 控制器(Helm 生命周期)
-│   └── helm/                 # Helm SDK 封装
-└── pkg/
-    ├── podwatch/             # Pod 监控子系统
-    │   ├── watcher.go        # SharedInformer + 事件路由
-    │   ├── queue.go          # UID 去重队列
-    │   ├── worker.go         # 单 Worker 串行处理
-    │   ├── collector.go      # Prometheus Collector + AI 指标采集
-    │   ├── sender.go         # HTTP Push 事件发送
-    │   ├── alert.go          # 告警占位符变量替换
-    │   └── types.go          # 核心数据结构
-    ├── policy/               # 策略引擎(条件检测 + 告警)
-    │   └── engine.go
-    └── log/                  # 日志工具
-`
+```
++-- api/v1alpha1/             # CRD 定义(ModelRelease)
++-- cmd/manager/              # Operator 入口
++-- config/samples/           # CR 示例
++-- internal/
+|   +-- controller/           # Reconcile 控制器(Helm 生命周期)
+|   +-- helm/                 # Helm SDK 封装
++-- pkg/
+    +-- podwatch/             # Pod 监控子系统
+    |   +-- watcher.go        # SharedInformer + 事件路由
+    |   +-- queue.go          # UID 去重队列
+    |   +-- worker.go         # 单 Worker 串行处理
+    |   +-- collector.go      # Prometheus Collector + AI 指标采集
+    |   +-- sender.go         # HTTP Push 事件发送
+    |   +-- alert.go          # 告警占位符变量替换
+    |   +-- types.go          # 核心数据结构
+    +-- policy/               # 策略引擎(条件检测 + 告警)
+    |   +-- engine.go
+    +-- log/                  # 日志工具
+```
 
 ---
 
@@ -236,4 +240,3 @@ curl http://localhost:9090/metrics | grep inferguard_
 - vLLM: 全支持
 - TGI (Text Generation Inference): 支持(指标名前缀不同)
 - SGLang: 支持(指标名前缀不同)
-

@@ -157,7 +157,7 @@ func (c *PodCollector) Collect(ch chan<- prometheus.Metric) {
 		inferenceState := c.scrapeAndEmit(ch, info, releaseName)
 		c.eventsProcessed++
 
-		// Evaluate AI-metrics-based policies (e.g. InferenceLatency > threshold -> rollback/notify)
+		// Evaluate AI-metrics-based policies (e.g. InferenceLatency > threshold -> notify)
 		if c.policyEngine != nil && inferenceState != nil {
 			releaseCfg := releases[releaseName]
 			if releaseCfg != nil {

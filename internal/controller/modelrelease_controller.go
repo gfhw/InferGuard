@@ -1,4 +1,4 @@
-package controller
+﻿package controller
 
 import (
 	"context"
@@ -86,7 +86,7 @@ func (r *ModelReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				if deletionRetries >= helmv1alpha1.MaxTransientRetries {
 					inferguardlog.Info("Helm uninstall failed after max retries, keeping CR as tombstone. Fix the underlying issue, then delete again.",
 						"release", hr.GetReleaseName(), "retries", deletionRetries, "error", err.Error())
-					// CR stays with finalizer �?it blocks deletion but preserves visibility.
+					// CR stays with finalizer 锟?it blocks deletion but preserves visibility.
 					// User must fix the Helm release and re-delete the CR.
 					return ctrl.Result{}, nil
 				}
@@ -100,7 +100,7 @@ func (r *ModelReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	// Stable: spec unchanged and already Running �?nothing to do.
+	// Stable: spec unchanged and already Running 锟?nothing to do.
 	if hr.IsStable() {
 		return ctrl.Result{}, nil
 	}
@@ -135,7 +135,7 @@ func (r *ModelReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{RequeueAfter: backoff}, nil
 	}
 
-	// Success �?no periodic requeue. Wait for spec change.
+	// Success 锟?no periodic requeue. Wait for spec change.
 	return ctrl.Result{}, nil
 }
 
@@ -242,8 +242,23 @@ func (r *ModelReleaseReconciler) performRollback(ctx context.Context, hr *helmv1
 		if rel.Chart != nil && rel.Chart.Metadata != nil {
 			fresh.Spec.Chart.Version = rel.Chart.Metadata.Version
 		}
+		// Sync values from the rolled-back release so CR spec matches reality.
+		if rel.Config != nil && len(rel.Config) > 0 {
+			valuesJSON, marshalErr := json.Marshal(rel.Config)
+			if marshalErr == nil {
+				fresh.Spec.Values = &runtime.RawExtension{Raw: valuesJSON}
+			}
+		}
 		if err := r.Update(ctx, fresh); err != nil {
 			inferguardlog.ErrorE(err, "Failed to update spec after rollback", "release", releaseName)
+		} else {
+			// Spec update incremented Generation. Align ObservedGeneration so
+			// the next Reconcile sees IsStable()=true without a no-op round.
+			fresh.Status.ObservedGeneration = fresh.Generation
+			fresh.Status.LastAttemptedGeneration = fresh.Generation
+			if err := r.Status().Update(ctx, fresh); err != nil {
+				inferguardlog.ErrorE(err, "Failed to align status after rollback spec sync", "release", releaseName)
+			}
 		}
 	}
 
@@ -491,3 +506,5 @@ func (u *crStatusUpdater) UpdatePodStatus(ctx context.Context, releaseName strin
 
 	return nil
 }
+
+
