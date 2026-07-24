@@ -129,6 +129,9 @@ func (w *GlobalPodWatcher) RegisterRelease(releaseName string, cfg *ReleaseConfi
 
 func (w *GlobalPodWatcher) SetPolicyEngine(engine *policy.Engine) {
 	w.policyEngine = engine
+	if w.collector != nil {
+		w.collector.SetPolicyEngine(engine)
+	}
 }
 
 func (w *GlobalPodWatcher) MarkReleaseRolledBack(releaseName string) {

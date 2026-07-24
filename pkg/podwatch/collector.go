@@ -15,6 +15,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/gfhw/inferguard/pkg/log"
+	"github.com/gfhw/inferguard/pkg/policy"
 )
 
 const (
@@ -88,10 +89,11 @@ var (
 // Pod-level state (Phase / Ready / Restart) is intentionally excluded ? use the
 // Webhook push or CR Status channels for those.
 type PodCollector struct {
-	podInformer cache.SharedIndexInformer
-	filter      *Filter
-	releases    *ReleaseRegistry
-	httpClient  *http.Client
+	podInformer  cache.SharedIndexInformer
+	filter       *Filter
+	releases     *ReleaseRegistry
+	httpClient   *http.Client
+	policyEngine *policy.Engine
 
 	eventsProcessed int64
 }
@@ -105,6 +107,11 @@ func NewPodCollector(podInformer cache.SharedIndexInformer, filter *Filter, rele
 			Timeout: 5 * time.Second,
 		},
 	}
+}
+
+// SetPolicyEngine injects the policy engine for AI-metrics-based auto-remediation.
+func (c *PodCollector) SetPolicyEngine(engine *policy.Engine) {
+	c.policyEngine = engine
 }
 
 func (c *PodCollector) Describe(ch chan<- *prometheus.Desc) {
@@ -147,33 +154,47 @@ func (c *PodCollector) Collect(ch chan<- prometheus.Metric) {
 		}
 
 		// Scrape vLLM / TGI / SGLang /metrics endpoint live.
-		c.scrapeAndEmit(ch, info, releaseName)
+		inferenceState := c.scrapeAndEmit(ch, info, releaseName)
 		c.eventsProcessed++
+
+		// Evaluate AI-metrics-based policies (e.g. InferenceLatency > threshold -> rollback)
+		if c.policyEngine != nil && inferenceState != nil {
+			releaseCfg := releases[releaseName]
+			if releaseCfg != nil && releaseCfg.AutoRemediation {
+				c.policyEngine.EvaluateInference(context.TODO(),
+					releaseName, info.Namespace, *inferenceState, releaseCfg.Policies)
+			}
+		}
 	}
 }
 
 // scrapeAndEmit fetches /metrics from the inference engine and emits Prometheus
 // metrics under the inferguard_ prefix.
-func (c *PodCollector) scrapeAndEmit(ch chan<- prometheus.Metric, info PodInfo, releaseName string) {
+func (c *PodCollector) scrapeAndEmit(ch chan<- prometheus.Metric, info PodInfo, releaseName string) *policy.InferenceState {
 	url := fmt.Sprintf("http://%s:%d/metrics", info.PodIP, defaultInferenceMetricsPort)
 	resp, err := c.httpClient.Get(url)
 	if err != nil {
 		log.Debug("Failed to scrape inference metrics",
 			"pod", info.Name, "url", url, "error", err.Error())
-		return
+		return nil
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return
+		return nil
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return
+		return nil
 	}
 
 	lines := strings.Split(string(body), "\n")
+    
+    state := &policy.InferenceState{
+    	Namespace: info.Namespace,
+    	Name:      info.Name,
+    }
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -198,6 +219,7 @@ func (c *PodCollector) scrapeAndEmit(ch chan<- prometheus.Metric, info PodInfo, 
 				inferenceLatencyDesc, prometheus.CounterValue, val,
 				info.Namespace, info.Name, releaseName, lookupLabel(labels, "model_name"),
 			)
+			state.LatencyP99Ms = val / 1000 // store as ms for policy threshold comparison
 		case strings.HasPrefix(metricName, "vllm:time_per_output_token_seconds_count"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceLatencyCountDesc, prometheus.CounterValue, val,
@@ -228,6 +250,7 @@ func (c *PodCollector) scrapeAndEmit(ch chan<- prometheus.Metric, info PodInfo, 
 				inferenceWaitingDesc, prometheus.GaugeValue, val,
 				info.Namespace, info.Name, releaseName,
 			)
+			state.RequestsWaiting = int32(val)
 		case strings.HasPrefix(metricName, "vllm:prompt_tokens_total"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceTokensDesc, prometheus.CounterValue, val,
@@ -243,8 +266,10 @@ func (c *PodCollector) scrapeAndEmit(ch chan<- prometheus.Metric, info PodInfo, 
 				inferenceGPUCacheDesc, prometheus.GaugeValue, val,
 				info.Namespace, info.Name, releaseName,
 			)
+			state.GPUCachePct = val
 		}
 	}
+	return state
 }
 
 func extractLabels(line string) map[string]string {

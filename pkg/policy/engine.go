@@ -15,6 +15,16 @@ type PodState struct {
 	Restart   int32
 }
 
+// InferenceState holds AI-specific metrics for policy evaluation.
+// Collected by the Prometheus Collector during active scrape of vLLM/TGI /metrics.
+type InferenceState struct {
+	Namespace       string
+	Name            string
+	LatencyP99Ms    float64 // P99 per-output-token latency in milliseconds
+	GPUCachePct     float64 // GPU KV-cache usage percentage (0-100)
+	RequestsWaiting int32   // Number of queued requests
+}
+
 // RollbackFunc is called when a policy triggers a rollback action.
 // Returns the new chart version after rollback.
 type RollbackFunc func(ctx context.Context, releaseName, namespace string, revision int) (newVersion string, err error)
@@ -109,6 +119,60 @@ func (e *Engine) Evaluate(ctx context.Context, releaseName, namespace string,
 
 // MarkRolledBack tells the engine that a rollback was performed (user or policy initiated).
 // This prevents further auto-rollbacks for this release.
+func (e *Engine) EvaluateInference(ctx context.Context, releaseName, namespace string,
+	infer InferenceState, policies []helmv1alpha1.PolicySpec) []PolicyResult {
+
+	var results []PolicyResult
+
+	for _, p := range policies {
+		if !e.matchInferenceCondition(p.Condition, infer) {
+			continue
+		}
+
+		result := PolicyResult{
+			PolicyName: p.Name,
+			Triggered:  true,
+		}
+
+		switch p.Action.Type {
+		case "Rollback":
+			if e.rolledBack[releaseName] {
+				result.Triggered = false
+				result.Message = "skipped: already rolled back once"
+				results = append(results, result)
+				continue
+			}
+
+			if e.rollback != nil {
+				newVer, err := e.rollback(ctx, releaseName, namespace, 0)
+				if err != nil {
+					result.ActionTaken = "rollback-failed"
+					result.Message = err.Error()
+				} else {
+					e.rolledBack[releaseName] = true
+					result.ActionTaken = "rollback"
+					result.Message = "rolled back to " + newVer
+					if e.afterRollback != nil {
+						e.afterRollback(ctx, releaseName, namespace, newVer)
+					}
+				}
+			}
+		case "Notify":
+			fallthrough
+		default:
+			if e.notify != nil {
+				e.notify(ctx, releaseName, "policy "+p.Name+" triggered: "+result.Message)
+			}
+			result.ActionTaken = "notify"
+			result.Message = "notification sent"
+		}
+
+		results = append(results, result)
+	}
+
+	return results
+}
+
 func (e *Engine) MarkRolledBack(releaseName string) {
 	e.rolledBack[releaseName] = true
 }
@@ -121,6 +185,19 @@ func (e *Engine) matchCondition(cond helmv1alpha1.PolicyCondition, pod PodState)
 		return !pod.Ready
 	case "PodCrash":
 		return pod.Phase == "Failed" || pod.Phase == "CrashLoopBackOff"
+	default:
+		return false
+	}
+}
+
+func (e *Engine) matchInferenceCondition(cond helmv1alpha1.PolicyCondition, infer InferenceState) bool {
+	switch cond.Type {
+	case "InferenceLatency":
+		return infer.LatencyP99Ms >= float64(cond.Threshold)
+	case "GPUCacheUsage":
+		return infer.GPUCachePct >= float64(cond.Threshold)
+	case "InferenceQueueDepth":
+		return infer.RequestsWaiting >= cond.Threshold
 	default:
 		return false
 	}
