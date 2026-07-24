@@ -91,7 +91,7 @@ func main() {
 			return nil
 		},
 		func(ctx context.Context, releaseName, namespace, newVersion string) error {
-			hrList := &helmv1alpha1.HelmReleaseList{}
+			hrList := &helmv1alpha1.ModelReleaseList{}
 			if err := mgr.GetClient().List(ctx, hrList); err != nil {
 				return err
 			}
@@ -108,7 +108,7 @@ func main() {
 	)
 	watcher.SetPolicyEngine(policyEngine)
 
-	reconciler := controller.NewHelmReleaseReconciler(
+	reconciler := controller.NewModelReleaseReconciler(
 		mgr.GetClient(),
 		mgr.GetScheme(),
 		k8sClient,
@@ -116,7 +116,7 @@ func main() {
 	)
 
 	if err = reconciler.SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "HelmRelease")
+		setupLog.Error(err, "unable to create controller", "controller", "ModelRelease")
 		os.Exit(1)
 	}
 

@@ -1,14 +1,14 @@
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: helmreleases.inferguard.io
+  name: modelreleases.inferguard.io
 spec:
   group: inferguard.io
   names:
-    kind: HelmRelease
-    listKind: HelmReleaseList
-    plural: helmreleases
-    singular: helmrelease
+    kind: ModelRelease
+    listKind: ModelReleaseList
+    plural: modelreleases
+    singular: modelrelease
     shortNames:
       - hr
   scope: Namespaced
@@ -18,7 +18,7 @@ spec:
       storage: true
       schema:
         openAPIV3Schema:
-          description: HelmRelease is the Schema for the helmreleases API
+          description: ModelRelease is the Schema for the modelreleases API
           type: object
           properties:
             apiVersion:
@@ -28,7 +28,7 @@ spec:
             metadata:
               type: object
             spec:
-              description: HelmReleaseSpec defines the desired state of HelmRelease
+              description: ModelReleaseSpec defines the desired state of ModelRelease
               type: object
               properties:
                 releaseName:
@@ -97,7 +97,7 @@ spec:
                       type: string
                       description: Address for Prometheus metrics endpoint
             status:
-              description: HelmReleaseStatus defines the observed state of HelmRelease
+              description: ModelReleaseStatus defines the observed state of ModelRelease
               type: object
               properties:
                 phase:

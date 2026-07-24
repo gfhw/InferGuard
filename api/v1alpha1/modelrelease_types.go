@@ -8,7 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-type HelmReleaseSpec struct {
+type ModelReleaseSpec struct {
 	ReleaseName string                `json:"releaseName,omitempty"`
 	Chart       ChartSpec             `json:"chart"`
 	Values      *runtime.RawExtension `json:"values,omitempty"`
@@ -89,7 +89,7 @@ type PodRuntimeStatus struct {
 	Restart   int32  `json:"restart"`
 }
 
-type HelmReleaseStatus struct {
+type ModelReleaseStatus struct {
 	Phase              string             `json:"phase,omitempty"`
 	ReleaseName        string             `json:"releaseName,omitempty"`
 	ReleaseVersion     int                `json:"releaseVersion,omitempty"`
@@ -110,43 +110,43 @@ type HelmReleaseStatus struct {
 	PodStatuses []PodRuntimeStatus `json:"podStatuses,omitempty"`
 }
 
-type HelmRelease struct {
+type ModelRelease struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   HelmReleaseSpec   `json:"spec,omitempty"`
-	Status HelmReleaseStatus `json:"status,omitempty"`
+	Spec   ModelReleaseSpec   `json:"spec,omitempty"`
+	Status ModelReleaseStatus `json:"status,omitempty"`
 }
 
-type HelmReleaseList struct {
+type ModelReleaseList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []HelmRelease `json:"items"`
+	Items           []ModelRelease `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&HelmRelease{}, &HelmReleaseList{})
+	SchemeBuilder.Register(&ModelRelease{}, &ModelReleaseList{})
 }
 
-func (in *HelmRelease) DeepCopy() *HelmRelease {
+func (in *ModelRelease) DeepCopy() *ModelRelease {
 	if in == nil {
 		return nil
 	}
-	out := &HelmRelease{}
+	out := &ModelRelease{}
 	in.DeepCopyInto(out)
 	return out
 }
 
-func (in *HelmRelease) DeepCopyObject() runtime.Object {
+func (in *ModelRelease) DeepCopyObject() runtime.Object {
 	if in == nil {
 		return nil
 	}
-	out := &HelmRelease{}
+	out := &ModelRelease{}
 	in.DeepCopyInto(out)
 	return out
 }
 
-func (in *HelmRelease) DeepCopyInto(out *HelmRelease) {
+func (in *ModelRelease) DeepCopyInto(out *ModelRelease) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
 	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
@@ -154,7 +154,7 @@ func (in *HelmRelease) DeepCopyInto(out *HelmRelease) {
 	in.Status.DeepCopyInto(&out.Status)
 }
 
-func (in *HelmReleaseSpec) DeepCopyInto(out *HelmReleaseSpec) {
+func (in *ModelReleaseSpec) DeepCopyInto(out *ModelReleaseSpec) {
 	*out = *in
 	if in.Values != nil {
 		in, out := &in.Values, &out.Values
@@ -188,7 +188,7 @@ func (in *HelmReleaseSpec) DeepCopyInto(out *HelmReleaseSpec) {
 	}
 }
 
-func (in *HelmReleaseStatus) DeepCopyInto(out *HelmReleaseStatus) {
+func (in *ModelReleaseStatus) DeepCopyInto(out *ModelReleaseStatus) {
 	*out = *in
 	if in.LastAppliedTime != nil {
 		in, out := &in.LastAppliedTime, &out.LastAppliedTime
@@ -202,22 +202,22 @@ func (in *HelmReleaseStatus) DeepCopyInto(out *HelmReleaseStatus) {
 	}
 }
 
-func (in *HelmReleaseList) DeepCopyObject() runtime.Object {
+func (in *ModelReleaseList) DeepCopyObject() runtime.Object {
 	if in == nil {
 		return nil
 	}
-	out := &HelmReleaseList{}
+	out := &ModelReleaseList{}
 	in.DeepCopyInto(out)
 	return out
 }
 
-func (in *HelmReleaseList) DeepCopyInto(out *HelmReleaseList) {
+func (in *ModelReleaseList) DeepCopyInto(out *ModelReleaseList) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
 	in.ListMeta.DeepCopyInto(&out.ListMeta)
 	if in.Items != nil {
 		in, out := &in.Items, &out.Items
-		*out = make([]HelmRelease, len(*in))
+		*out = make([]ModelRelease, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
@@ -243,51 +243,51 @@ const (
 	TypeFailed = "Failed"
 )
 
-func (in *HelmRelease) GetReleaseNamespace() string {
+func (in *ModelRelease) GetReleaseNamespace() string {
 	if in.Spec.Namespace != "" {
 		return in.Spec.Namespace
 	}
 	return in.Namespace
 }
 
-func (in *HelmRelease) GetReleaseName() string {
+func (in *ModelRelease) GetReleaseName() string {
 	if in.Spec.ReleaseName != "" {
 		return in.Spec.ReleaseName
 	}
 	return in.Name
 }
 
-func (in *HelmRelease) IsPodMonitorEnabled() bool {
+func (in *ModelRelease) IsPodMonitorEnabled() bool {
 	return in.Spec.PodMonitor.Enabled
 }
 
-func (in *HelmRelease) GetPodMonitorEndpoint() string {
+func (in *ModelRelease) GetPodMonitorEndpoint() string {
 	return in.Spec.PodMonitor.Endpoint
 }
 
-func (in *HelmRelease) GetPodMonitorMethod() string {
+func (in *ModelRelease) GetPodMonitorMethod() string {
 	if in.Spec.PodMonitor.Method == "" {
 		return "POST"
 	}
 	return in.Spec.PodMonitor.Method
 }
 
-func (in *HelmRelease) GetPodMonitorHeaders() map[string]string {
+func (in *ModelRelease) GetPodMonitorHeaders() map[string]string {
 	if in.Spec.PodMonitor.Headers == nil {
 		return map[string]string{}
 	}
 	return in.Spec.PodMonitor.Headers
 }
 
-func (in *HelmRelease) GetPrometheusAddr() string {
+func (in *ModelRelease) GetPrometheusAddr() string {
 	return in.Spec.PodMonitor.PrometheusAddr
 }
 
-func (in *HelmRelease) ShouldRollback() bool {
+func (in *ModelRelease) ShouldRollback() bool {
 	return in.Spec.TargetRevision != "" && in.Spec.TargetRevision != fmt.Sprintf("%d", in.Status.Revision)
 }
 
-func (in *HelmRelease) GetTargetRevision() int {
+func (in *ModelRelease) GetTargetRevision() int {
 	if in.Spec.TargetRevision == "" {
 		return 0
 	}
@@ -296,25 +296,25 @@ func (in *HelmRelease) GetTargetRevision() int {
 	return rev
 }
 
-func (in *HelmRelease) ShouldForceUpgrade() bool {
+func (in *ModelRelease) ShouldForceUpgrade() bool {
 	return in.Spec.ForceUpgrade
 }
 
-func (in *HelmRelease) ShouldAtomic() bool {
+func (in *ModelRelease) ShouldAtomic() bool {
 	return in.Spec.Atomic
 }
 
-func (in *HelmRelease) GetWaitTimeout() time.Duration {
+func (in *ModelRelease) GetWaitTimeout() time.Duration {
 	if in.Spec.WaitTimeout <= 0 {
 		return 5 * time.Minute
 	}
 	return time.Duration(in.Spec.WaitTimeout) * time.Second
 }
-func (in *HelmRelease) HasRetriesExhausted() bool {
+func (in *ModelRelease) HasRetriesExhausted() bool {
 	return in.Status.RetryCount >= MaxTransientRetries
 }
 
-func (in *HelmRelease) IsStable() bool {
+func (in *ModelRelease) IsStable() bool {
 	return in.Status.Phase == PhaseRunning &&
 		in.Status.ObservedGeneration == in.Generation &&
 		in.Status.LastAttemptedGeneration == in.Generation

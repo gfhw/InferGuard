@@ -1,5 +1,5 @@
 apiVersion: inferguard.io/v1alpha1
-kind: HelmRelease
+kind: ModelRelease
 metadata:
   name: my-app-rollback
   namespace: default

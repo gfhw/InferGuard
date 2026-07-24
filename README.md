@@ -46,7 +46,7 @@ Helm 的 `--wait --atomic` 只管到「部署成功那一刻」，之后 Pod 崩
 ### Per-release 精细化控制
 
 - **事件过滤器**：`onUnhealthyOnly` / `minRestartCount` / `ignoreEventTypes` 按 release 独立配置。
-- **独立 Webhook**：每个 HelmRelease 可推送到不同的 URL，带自定义 headers。
+- **独立 Webhook**：每个 ModelRelease 可推送到不同的 URL，带自定义 headers。
 - **独立策略**：每个 release 可配不同的自愈规则。
 
 ---
@@ -58,7 +58,7 @@ Helm 的 `--wait --atomic` 只管到「部署成功那一刻」，之后 Pod 崩
                               |
                +--------------+--------------+
                |                             |
-     HelmRelease Controller          SharedInformer
+     ModelRelease Controller          SharedInformer
      (Reconcile: install/            (watch Helm Pods)
       upgrade/rollback/                    |
       uninstall)                    PodEventQueue
@@ -117,11 +117,11 @@ InferGuard:             运行时（deployed → monitor → 不健康 → 自�
 
 ---
 
-## HelmRelease CRD 示例
+## ModelRelease CRD 示例
 
 ```yaml
 apiVersion: inferguard.io/v1alpha1
-kind: HelmRelease
+kind: ModelRelease
 metadata:
   name: llama-3-8b
 spec:
@@ -246,7 +246,7 @@ Prometheus 只暴露 AI 推理指标，Pod 状态指标请走 Webhook Push 或 C
 | `type` | ADDED / MODIFIED / DELETED |
 | `pod` | API Server 实时状态（DELETED 时为空） |
 | `oldPod` | 仅在 DELETED 时出现——Pod 删除前最后已知状态 |
-| `releaseName` | 所属 HelmRelease 名称 |
+| `releaseName` | 所属 ModelRelease 名称 |
 
 ### 策略告警事件（由 CR 中 alertBody 定义）
 
@@ -275,7 +275,7 @@ kubectl apply -k config/default
 kubectl apply -f model-release.yaml
 
 # 查看状态
-kubectl get helmrelease llama-3-8b -o yaml
+kubectl get modelrelease llama-3-8b -o yaml
 
 # 抓取 Prometheus 指标
 curl http://inferguard-metrics:9090/metrics
@@ -286,7 +286,7 @@ curl http://inferguard-metrics:9090/metrics
 ## 项目结构
 
 ```
-api/v1alpha1/              CRD 类型：HelmRelease + 策略/过滤定义
+api/v1alpha1/              CRD 类型：ModelRelease + 策略/过滤定义
 cmd/manager/main.go        入口，组装全链路
 internal/
   controller/              Reconcile 循环 + Helm 操作 + CR Status

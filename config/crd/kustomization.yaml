@@ -1,2 +1,2 @@
 resources:
-- bases/inferguard.io_helmreleases.yaml
+- bases/inferguard.io_modelreleases.yaml

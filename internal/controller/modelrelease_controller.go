@@ -25,11 +25,11 @@ import (
 )
 
 const (
-	helmReleaseFinalizer = "inferguard.io/finalizer"
+	modelReleaseFinalizer = "inferguard.io/finalizer"
 	maxBackoff           = 10 * time.Minute
 )
 
-type HelmReleaseReconciler struct {
+type ModelReleaseReconciler struct {
 	client.Client
 	Scheme      *runtime.Scheme
 	HelmManager *helm.Manager
@@ -39,8 +39,8 @@ type HelmReleaseReconciler struct {
 	releaseNames map[string]string
 }
 
-func NewHelmReleaseReconciler(client client.Client, scheme *runtime.Scheme, k8sClient kubernetes.Interface, watcher *podwatch.GlobalPodWatcher) *HelmReleaseReconciler {
-	return &HelmReleaseReconciler{
+func NewModelReleaseReconciler(client client.Client, scheme *runtime.Scheme, k8sClient kubernetes.Interface, watcher *podwatch.GlobalPodWatcher) *ModelReleaseReconciler {
+	return &ModelReleaseReconciler{
 		Client:       client,
 		Scheme:       scheme,
 		HelmManager:  helm.NewManager(),
@@ -50,10 +50,10 @@ func NewHelmReleaseReconciler(client client.Client, scheme *runtime.Scheme, k8sC
 	}
 }
 
-func (r *HelmReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *ModelReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	_ = ctrlLog.FromContext(ctx)
 
-	hr := &helmv1alpha1.HelmRelease{}
+	hr := &helmv1alpha1.ModelRelease{}
 	if err := r.Get(ctx, req.NamespacedName, hr); err != nil {
 		if errors.IsNotFound(err) {
 			key := req.NamespacedName.String()
@@ -68,14 +68,14 @@ func (r *HelmReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// Handle deletion.
 	if !hr.ObjectMeta.DeletionTimestamp.IsZero() {
-		if controllerutil.ContainsFinalizer(hr, helmReleaseFinalizer) {
+		if controllerutil.ContainsFinalizer(hr, modelReleaseFinalizer) {
 			// Reset retry counter on first deletion attempt (it may be stale from install failures).
 			deletionRetries := hr.Status.RetryCount
 			if hr.Status.Phase != "UninstallFailed" {
 				deletionRetries = 0
 			}
 
-			if err := r.finalizeHelmRelease(ctx, hr); err != nil {
+			if err := r.finalizeModelRelease(ctx, hr); err != nil {
 				deletionRetries++
 				updated := hr.DeepCopy()
 				updated.Status.RetryCount = deletionRetries
@@ -92,7 +92,7 @@ func (r *HelmReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				}
 				return ctrl.Result{}, err
 			}
-			controllerutil.RemoveFinalizer(hr, helmReleaseFinalizer)
+			controllerutil.RemoveFinalizer(hr, modelReleaseFinalizer)
 			if err := r.Update(ctx, hr); err != nil {
 				return ctrl.Result{}, err
 			}
@@ -115,15 +115,15 @@ func (r *HelmReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// Ensure finalizer is present.
-	if !controllerutil.ContainsFinalizer(hr, helmReleaseFinalizer) {
-		controllerutil.AddFinalizer(hr, helmReleaseFinalizer)
+	if !controllerutil.ContainsFinalizer(hr, modelReleaseFinalizer) {
+		controllerutil.AddFinalizer(hr, modelReleaseFinalizer)
 		if err := r.Update(ctx, hr); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 
 	// Attempt reconciliation.
-	if err := r.reconcileHelmRelease(ctx, hr); err != nil {
+	if err := r.reconcileModelRelease(ctx, hr); err != nil {
 		backoff := time.Duration(1<<hr.Status.RetryCount) * time.Second
 		if backoff > maxBackoff {
 			backoff = maxBackoff
@@ -139,14 +139,14 @@ func (r *HelmReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	return ctrl.Result{}, nil
 }
 
-func (r *HelmReleaseReconciler) reconcileHelmRelease(ctx context.Context, hr *helmv1alpha1.HelmRelease) error {
+func (r *ModelReleaseReconciler) reconcileModelRelease(ctx context.Context, hr *helmv1alpha1.ModelRelease) error {
 	if hr.ShouldRollback() {
 		return r.performRollback(ctx, hr)
 	}
 	return r.performInstallOrUpgrade(ctx, hr)
 }
 
-func (r *HelmReleaseReconciler) performInstallOrUpgrade(ctx context.Context, hr *helmv1alpha1.HelmRelease) error {
+func (r *ModelReleaseReconciler) performInstallOrUpgrade(ctx context.Context, hr *helmv1alpha1.ModelRelease) error {
 	releaseName := hr.GetReleaseName()
 	releaseNs := hr.GetReleaseNamespace()
 
@@ -207,7 +207,7 @@ func (r *HelmReleaseReconciler) performInstallOrUpgrade(ctx context.Context, hr 
 	return r.managePodMonitor(ctx, hr)
 }
 
-func (r *HelmReleaseReconciler) performRollback(ctx context.Context, hr *helmv1alpha1.HelmRelease) error {
+func (r *ModelReleaseReconciler) performRollback(ctx context.Context, hr *helmv1alpha1.ModelRelease) error {
 	releaseName := hr.GetReleaseName()
 	releaseNs := hr.GetReleaseNamespace()
 	targetRevision := hr.GetTargetRevision()
@@ -234,7 +234,7 @@ func (r *HelmReleaseReconciler) performRollback(ctx context.Context, hr *helmv1a
 
 	// Fetch a fresh copy of the CR (status was already updated above, which changed resourceVersion).
 	// Then align the spec with the rolled-back state.
-	fresh := &helmv1alpha1.HelmRelease{}
+	fresh := &helmv1alpha1.ModelRelease{}
 	if err := r.Get(ctx, types.NamespacedName{Namespace: hr.Namespace, Name: hr.Name}, fresh); err != nil {
 		inferguardlog.ErrorE(err, "Failed to re-fetch CR after rollback", "release", releaseName)
 	} else {
@@ -251,7 +251,7 @@ func (r *HelmReleaseReconciler) performRollback(ctx context.Context, hr *helmv1a
 	return r.managePodMonitor(ctx, hr)
 }
 
-func (r *HelmReleaseReconciler) managePodMonitor(ctx context.Context, hr *helmv1alpha1.HelmRelease) error {
+func (r *ModelReleaseReconciler) managePodMonitor(ctx context.Context, hr *helmv1alpha1.ModelRelease) error {
 	releaseName := hr.GetReleaseName()
 
 	key := types.NamespacedName{Namespace: hr.Namespace, Name: hr.Name}.String()
@@ -292,11 +292,11 @@ func (r *HelmReleaseReconciler) managePodMonitor(ctx context.Context, hr *helmv1
 	return nil
 }
 
-func (r *HelmReleaseReconciler) unmanagePodMonitor(releaseName string) {
+func (r *ModelReleaseReconciler) unmanagePodMonitor(releaseName string) {
 	r.Watcher.UnregisterRelease(releaseName)
 }
 
-func (r *HelmReleaseReconciler) getValues(hr *helmv1alpha1.HelmRelease) (map[string]interface{}, error) {
+func (r *ModelReleaseReconciler) getValues(hr *helmv1alpha1.ModelRelease) (map[string]interface{}, error) {
 	if hr.Spec.Values == nil {
 		return map[string]interface{}{}, nil
 	}
@@ -352,7 +352,7 @@ func isRetryable(err error) bool {
 	return true
 }
 
-func (r *HelmReleaseReconciler) finalizeHelmRelease(ctx context.Context, hr *helmv1alpha1.HelmRelease) error {
+func (r *ModelReleaseReconciler) finalizeModelRelease(ctx context.Context, hr *helmv1alpha1.ModelRelease) error {
 	releaseName := hr.GetReleaseName()
 	releaseNs := hr.GetReleaseNamespace()
 
@@ -374,7 +374,7 @@ func (r *HelmReleaseReconciler) finalizeHelmRelease(ctx context.Context, hr *hel
 	return nil
 }
 
-func (r *HelmReleaseReconciler) updateStatusPhase(ctx context.Context, hr *helmv1alpha1.HelmRelease, phase string) {
+func (r *ModelReleaseReconciler) updateStatusPhase(ctx context.Context, hr *helmv1alpha1.ModelRelease, phase string) {
 	updated := hr.DeepCopy()
 	updated.Status.Phase = phase
 	if err := r.Status().Update(ctx, updated); err != nil {
@@ -382,7 +382,7 @@ func (r *HelmReleaseReconciler) updateStatusPhase(ctx context.Context, hr *helmv
 	}
 }
 
-func (r *HelmReleaseReconciler) updateStatusSuccess(ctx context.Context, hr *helmv1alpha1.HelmRelease, rel interface{}) error {
+func (r *ModelReleaseReconciler) updateStatusSuccess(ctx context.Context, hr *helmv1alpha1.ModelRelease, rel interface{}) error {
 	updated := hr.DeepCopy()
 	updated.Status.Phase = helmv1alpha1.PhaseRunning
 	updated.Status.ReleaseName = hr.GetReleaseName()
@@ -413,7 +413,7 @@ func (r *HelmReleaseReconciler) updateStatusSuccess(ctx context.Context, hr *hel
 	return nil
 }
 
-func (r *HelmReleaseReconciler) updateStatusFailed(ctx context.Context, hr *helmv1alpha1.HelmRelease, message string) {
+func (r *ModelReleaseReconciler) updateStatusFailed(ctx context.Context, hr *helmv1alpha1.ModelRelease, message string) {
 	updated := hr.DeepCopy()
 	updated.Status.Phase = helmv1alpha1.PhaseFailed
 	updated.Status.LastAttemptedGeneration = hr.Generation
@@ -424,9 +424,9 @@ func (r *HelmReleaseReconciler) updateStatusFailed(ctx context.Context, hr *helm
 	}
 }
 
-func (r *HelmReleaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *ModelReleaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&helmv1alpha1.HelmRelease{}).
+		For(&helmv1alpha1.ModelRelease{}).
 		Complete(r)
 }
 
@@ -438,15 +438,15 @@ type crStatusUpdater struct {
 }
 
 func (u *crStatusUpdater) UpdatePodStatus(ctx context.Context, releaseName string, podInfo podwatch.PodInfo, eventType podwatch.PodEventType) error {
-	hr := &helmv1alpha1.HelmRelease{}
+	hr := &helmv1alpha1.ModelRelease{}
 	key := types.NamespacedName{Namespace: u.crNamespace, Name: u.crName}
 	if err := u.client.Get(ctx, key, hr); err != nil {
 		if errors.IsNotFound(err) {
-			inferguardlog.Info("HelmRelease not found, skipping status update",
+			inferguardlog.Info("ModelRelease not found, skipping status update",
 				"namespace", u.crNamespace, "name", u.crName)
 			return nil
 		}
-		return fmt.Errorf("failed to get HelmRelease: %w", err)
+		return fmt.Errorf("failed to get ModelRelease: %w", err)
 	}
 
 	updated := hr.DeepCopy()

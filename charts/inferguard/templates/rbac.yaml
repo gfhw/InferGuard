@@ -8,7 +8,7 @@ rules:
 - apiGroups:
   - inferguard.io
   resources:
-  - helmreleases
+  - modelreleases
   verbs:
   - create
   - delete
@@ -20,13 +20,13 @@ rules:
 - apiGroups:
   - inferguard.io
   resources:
-  - helmreleases/finalizers
+  - modelreleases/finalizers
   verbs:
   - update
 - apiGroups:
   - inferguard.io
   resources:
-  - helmreleases/status
+  - modelreleases/status
   verbs:
   - get
   - patch
