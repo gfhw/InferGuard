@@ -147,13 +147,35 @@ spec:
       onUnhealthyOnly: true
       minRestartCount: 3
   policies:
-    - name: auto-rollback-on-crash
+    - name: restart-rollback
       condition:
         type: PodRestart
         threshold: 5
       action:
         type: Rollback
-        notify: true
+
+    - name: high-latency-alert
+      condition:
+        type: InferenceLatency
+        threshold: 5000
+      action:
+        type: Notify
+        triggerCount: 3
+        alertBody: |
+          {
+            "event": "inference_latency_high",
+            "release": "${release_name}",
+            "pod": "${pod_name}",
+            "avg_latency_ms": ${inference_latency_ms},
+            "threshold_ms": 5000
+          }
+
+    - name: gpu-cache-rollback
+      condition:
+        type: GPUCacheUsage
+        threshold: 90
+      action:
+        type: Rollback
 ```
 
 ### 关键字段速查
@@ -173,9 +195,11 @@ spec:
 | 过滤 | `podMonitor.filter.onUnhealthyOnly` | 只推送不健康事件 |
 | 过滤 | `podMonitor.filter.minRestartCount` | restart 阈值 |
 | 过滤 | `podMonitor.filter.ignoreEventTypes` | 跳过的事件类型 |
-| 策略 | `policies[].condition.type` | PodRestart / PodNotReady / PodCrash |
+| 策略 | `policies[].condition.type` | PodRestart / PodNotReady / PodCrash / InferenceLatency / GPUCacheUsage / InferenceQueueDepth |
 | 策略 | `policies[].condition.threshold` | 触发阈值 |
 | 策略 | `policies[].action.type` | Rollback / Notify |
+| 策略 | `policies[].action.triggerCount` | 连续触发次数（默认 1） |
+| 策略 | `policies[].action.alertBody` | 告警 JSON 体，支持 ${release_name} ${pod_name} 等占位符 |
 
 ---
 
@@ -203,6 +227,8 @@ Prometheus 只暴露 AI 推理指标，Pod 状态指标请走 Webhook Push 或 C
 
 ## 推送事件格式
 
+### Pod 状态事件（自动推送）
+
 ```json
 {
   "type": "MODIFIED",
@@ -221,6 +247,20 @@ Prometheus 只暴露 AI 推理指标，Pod 状态指标请走 Webhook Push 或 C
 | `pod` | API Server 实时状态（DELETED 时为空） |
 | `oldPod` | 仅在 DELETED 时出现——Pod 删除前最后已知状态 |
 | `releaseName` | 所属 HelmRelease 名称 |
+
+### 策略告警事件（由 CR 中 alertBody 定义）
+
+```json
+{
+  "event": "inference_latency_high",
+  "release": "llama-3-8b",
+  "pod": "llama-3-8b-vllm-7d4f2",
+  "avg_latency_ms": 8200.0,
+  "threshold_ms": 5000
+}
+```
+
+`alertBody` 支持占位符：`${release_name}` `${pod_name}` `${namespace}` `${pod_phase}` `${pod_restart}` `${pod_ip}` `${inference_latency_ms}` `${gpu_cache_pct}`
 
 ---
 
