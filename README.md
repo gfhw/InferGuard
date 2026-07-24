@@ -1,6 +1,6 @@
 # InferGuard
 
-AI inference deployment, real-time monitoring, and auto-remediation operator for Kubernetes. Deploy vLLM/TGI/SGLang with Helm, let InferGuard keep them running.
+AI inference Pod lifecycle management operator for Kubernetes ? declarative deploy, real-time monitoring, Prometheus export, and auto-remediation. One CRD controls the full lifecycle of your AI inference Pods.
 
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://golang.org/dl/)
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-1.28+-326CE5?style=flat&logo=kubernetes)](https://kubernetes.io/)
@@ -10,7 +10,9 @@ AI inference deployment, real-time monitoring, and auto-remediation operator for
 
 ## What problem does this solve?
 
-vLLM, TGI, and other inference engines excel at fast token generation but lack operational capabilities. You run helm install vllm, it deploys, and you're on your own for:
+Deploying an AI model on Kubernetes is not just helm install. A model Pod goes through GPU scheduling, weight downloading (5GB+), memory allocation, warmup inference ? and then runs 24/7 serving requests. At any point it can GPU-OOM, latency-spike, or silently degrade.
+
+**InferGuard manages the full lifecycle of AI inference Pods.** From Helm-based deployment through runtime monitoring to automated rollback ? one CRD, closed loop.
 
 - **Runtime health**: Is the model really serving? What's the P99 latency right now?
 - **Auto-remediation**: GPU OOM? Latency spike? Token quality degraded? Who rolls back?
@@ -33,9 +35,9 @@ vLLM, TGI, and other inference engines excel at fast token generation but lack o
 | Local Chart | chart.localPath loads .tgz or directory directly |
 
 ### AI inference monitoring
-- **Active scrape**: Prometheus Collector fetches /metrics from each inference pod in real time ? **NOT from Informer cache**.
+- **Prometheus Collector actively queries API Server** for Pod state (Phase/Ready/Restart) + HTTP GETs each inference pod's /metrics for AI metrics ? **zero Informer cache reliance, real-time only**.
+- **Consistency guarantee**: Webhook Push and Prometheus metrics use the same API Server source, eliminating the Informer-cache-vs-real-state discrepancy.
 - **vLLM-native metrics**: latency, TTFT, token throughput, requests running/waiting, GPU KV-cache usage.
-- **Pod-level metrics**: Phase, Ready, Restart ? from Informer (eventually consistent, supplemented by active scrape).
 - **Three-channel output**: HTTP Webhook Push + Prometheus Pull + CR Status write-back.
 
 ### Smart auto-remediation
@@ -96,13 +98,15 @@ Helm's --wait --atomic:   deploy-time (install ? deployed, then exits)
 InferGuard:              runtime (deployed ? monitor ? unhealthy ? auto-rollback)
 `
 
-The Prometheus Collector uses **active scrape**, not Informer cache, for AI metrics. When Prometheus hits /metrics, InferGuard:
+The Prometheus Collector uses **API Server real-time queries**, not Informer cache. When Prometheus scrapes /metrics, InferGuard:
 
-1. Iterates Informer store for pod-level state (Phase/Ready/Restart)
+1. Queries API Server (k8sClient.CoreV1().Pods().Get()) for each managed Pod ? real-time Phase/Ready/Restart
 2. Identifies registered inference pods (via ReleaseRegistry)
 3. HTTP GETs http://<podIP>:8000/metrics from each inference pod
 4. Parses vLLM/TGI-native Prometheus metrics
-5. Re-exposes them under the inferguard_ prefix
+5. Re-exposes everything under the inferguard_ prefix
+
+**This means Pod State in Prometheus === Pod State pushed via Webhook.** Both use API Server as the single source of truth.
 
 This means **zero additional exporters** ? no 
 vidia-dcgm-exporter, no ServiceMonitor per model. InferGuard IS the exporter.
@@ -191,7 +195,7 @@ spec:
 
 ## Prometheus metrics
 
-### Pod metrics (source: Informer)
+### Pod metrics (source: API Server real-time query)
 
 | Metric | Labels | Description |
 |--------|--------|-------------|
@@ -200,7 +204,7 @@ spec:
 | inferguard_pod_restart_total | namespace, name, release | Cumulative restarts |
 | inferguard_pod_events_total | event_type | Events processed by type |
 
-### AI inference metrics (source: active scrape of vLLM/TGI /metrics)
+### AI inference metrics (source: HTTP GET vLLM/TGI /metrics per scrape)
 
 | Metric | Labels | Description |
 |--------|--------|-------------|

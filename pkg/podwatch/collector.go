@@ -13,6 +13,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/gfhw/inferguard/pkg/log"
@@ -106,6 +108,7 @@ type PodCollector struct {
 	podInformer cache.SharedIndexInformer
 	filter      *Filter
 	releases    *ReleaseRegistry
+	k8sClient   kubernetes.Interface
 	httpClient  *http.Client
 
 	eventsMu       sync.Mutex
@@ -114,11 +117,12 @@ type PodCollector struct {
 	eventsDeleted  int64
 }
 
-func NewPodCollector(podInformer cache.SharedIndexInformer, filter *Filter, releases *ReleaseRegistry) *PodCollector {
+func NewPodCollector(podInformer cache.SharedIndexInformer, filter *Filter, releases *ReleaseRegistry, k8sClient kubernetes.Interface) *PodCollector {
 	return &PodCollector{
 		podInformer: podInformer,
 		filter:      filter,
 		releases:    releases,
+		k8sClient:   k8sClient,
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
 		},
@@ -158,34 +162,58 @@ func (c *PodCollector) Collect(ch chan<- prometheus.Metric) {
 			continue
 		}
 
-		info := ConvertToPodInfo(pod)
 		releaseName := GetReleaseName(pod)
 		if releaseName == "" {
 			continue
 		}
+
+		// ?? Pod-level metrics (real-time API Server query, NOT Informer cache) ??
+		// This matches the Webhook push path: both use API Server's current state,
+		// eliminating the inconsistency between Prometheus and push channels.
+		livePod, err := c.k8sClient.CoreV1().Pods(pod.Namespace).Get(context.TODO(), pod.Name, metav1.GetOptions{})
+		if err != nil {
+			// Pod may have been deleted; use Informer cache as fallback
+			liveInfo := ConvertToPodInfo(pod)
+			ready := float64(0)
+			if liveInfo.Ready {
+				ready = 1
+			}
+			ch <- prometheus.MustNewConstMetric(
+				podInfoDesc, prometheus.GaugeValue, 1,
+				liveInfo.Namespace, liveInfo.Name, releaseName, liveInfo.Phase, liveInfo.NodeName, liveInfo.PodIP,
+			)
+			ch <- prometheus.MustNewConstMetric(
+				podReadyDesc, prometheus.GaugeValue, ready,
+				liveInfo.Namespace, liveInfo.Name, releaseName,
+			)
+			ch <- prometheus.MustNewConstMetric(
+				podRestartDesc, prometheus.GaugeValue, float64(liveInfo.Restart),
+				liveInfo.Namespace, liveInfo.Name, releaseName,
+			)
+			continue
+		}
+		liveInfo := ConvertToPodInfo(livePod)
 		ready := float64(0)
-		if info.Ready {
+		if liveInfo.Ready {
 			ready = 1
 		}
 
-		// ?? Pod-level metrics (always emitted) ??
 		ch <- prometheus.MustNewConstMetric(
 			podInfoDesc, prometheus.GaugeValue, 1,
-			info.Namespace, info.Name, releaseName, info.Phase, info.NodeName, info.PodIP,
+			liveInfo.Namespace, liveInfo.Name, releaseName, liveInfo.Phase, liveInfo.NodeName, liveInfo.PodIP,
 		)
 		ch <- prometheus.MustNewConstMetric(
 			podReadyDesc, prometheus.GaugeValue, ready,
-			info.Namespace, info.Name, releaseName,
+			liveInfo.Namespace, liveInfo.Name, releaseName,
 		)
 		ch <- prometheus.MustNewConstMetric(
-			podRestartDesc, prometheus.GaugeValue, float64(info.Restart),
-			info.Namespace, info.Name, releaseName,
+			podRestartDesc, prometheus.GaugeValue, float64(liveInfo.Restart),
+			liveInfo.Namespace, liveInfo.Name, releaseName,
 		)
 
 		// ?? AI inference metrics (active scrape) ??
-		// Only scrape pods that belong to a registered release and have a PodIP.
-		if tracked[releaseName] && info.Ready && info.PodIP != "" {
-			c.scrapeAndEmitInferenceMetrics(ch, info, releaseName)
+		if tracked[releaseName] && liveInfo.Ready && liveInfo.PodIP != "" {
+			c.scrapeAndEmitInferenceMetrics(ch, liveInfo, releaseName)
 		}
 	}
 
