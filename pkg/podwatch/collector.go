@@ -7,65 +7,48 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/gfhw/inferguard/pkg/log"
 )
 
 const (
-	metricsNamespace          = "inferguard"
+	metricsNamespace            = "inferguard"
 	defaultInferenceMetricsPort = 8000
 )
 
-// ??? Pod-level metrics (source: Informer) ???
-
-var (
-	podInfoDesc = prometheus.NewDesc(
-		prometheus.BuildFQName(metricsNamespace, "", "pod_info"),
-		"Information about managed pods",
-		[]string{"namespace", "name", "release", "phase", "node", "pod_ip"},
-		nil,
-	)
-	podReadyDesc = prometheus.NewDesc(
-		prometheus.BuildFQName(metricsNamespace, "", "pod_ready"),
-		"Whether the managed pod is ready (1=ready, 0=not ready)",
-		[]string{"namespace", "name", "release"},
-		nil,
-	)
-	podRestartDesc = prometheus.NewDesc(
-		prometheus.BuildFQName(metricsNamespace, "", "pod_restart_total"),
-		"Total restart count of the managed pod",
-		[]string{"namespace", "name", "release"},
-		nil,
-	)
-	podEventsTotalDesc = prometheus.NewDesc(
-		prometheus.BuildFQName(metricsNamespace, "", "pod_events_total"),
-		"Total number of pod events processed by type",
-		[]string{"event_type"},
-		nil,
-	)
-)
-
-// ??? AI inference metrics (source: active scrape of vLLM/TGI /metrics) ???
+// All Prometheus metrics are AI-inference-specific, scraped live from each
+// inference engine Pod (vLLM / TGI / SGLang) at Prometheus scrape time.
+// Pod-level state (Phase / Ready / Restart) is handled by the Webhook push
+// and CR Status channels ? Prometheus stays focused on AI infra observability.
 
 var (
 	inferenceLatencyDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(metricsNamespace, "", "inference_latency_seconds"),
-		"Per-output-token generation latency in seconds (sum/count for avg)",
+		"Per-output-token generation latency sum (divide by _count for avg)",
+		[]string{"namespace", "pod", "release", "model"},
+		nil,
+	)
+	inferenceLatencyCountDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(metricsNamespace, "", "inference_latency_seconds_count"),
+		"Per-output-token generation latency count",
 		[]string{"namespace", "pod", "release", "model"},
 		nil,
 	)
 	inferenceTTFTDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(metricsNamespace, "", "inference_time_to_first_token_seconds"),
-		"Time-to-first-token latency in seconds (sum/count for avg)",
+		"Time-to-first-token latency sum",
+		[]string{"namespace", "pod", "release", "model"},
+		nil,
+	)
+	inferenceTTFTCountDesc = prometheus.NewDesc(
+		prometheus.BuildFQName(metricsNamespace, "", "inference_time_to_first_token_seconds_count"),
+		"Time-to-first-token latency count",
 		[]string{"namespace", "pod", "release", "model"},
 		nil,
 	)
@@ -83,7 +66,7 @@ var (
 	)
 	inferenceWaitingDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(metricsNamespace, "", "inference_requests_waiting"),
-		"Currently waiting inference requests (queued)",
+		"Currently waiting (queued) inference requests",
 		[]string{"namespace", "pod", "release"},
 		nil,
 	)
@@ -95,34 +78,29 @@ var (
 	)
 	inferenceGPUCacheDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(metricsNamespace, "", "inference_gpu_cache_usage_percent"),
-		"GPU KV cache usage percentage",
+		"GPU KV-cache usage percentage",
 		[]string{"namespace", "pod", "release"},
 		nil,
 	)
 )
 
-// PodCollector implements prometheus.Collector.
-// Pod-level metrics come from the Informer cache.
-// AI inference metrics are scraped live from each inference pod's /metrics endpoint.
+// PodCollector implements prometheus.Collector, exposing only AI inference metrics.
+// Pod-level state (Phase / Ready / Restart) is intentionally excluded ? use the
+// Webhook push or CR Status channels for those.
 type PodCollector struct {
 	podInformer cache.SharedIndexInformer
 	filter      *Filter
 	releases    *ReleaseRegistry
-	k8sClient   kubernetes.Interface
 	httpClient  *http.Client
 
-	eventsMu       sync.Mutex
-	eventsAdded    int64
-	eventsModified int64
-	eventsDeleted  int64
+	eventsProcessed int64
 }
 
-func NewPodCollector(podInformer cache.SharedIndexInformer, filter *Filter, releases *ReleaseRegistry, k8sClient kubernetes.Interface) *PodCollector {
+func NewPodCollector(podInformer cache.SharedIndexInformer, filter *Filter, releases *ReleaseRegistry) *PodCollector {
 	return &PodCollector{
 		podInformer: podInformer,
 		filter:      filter,
 		releases:    releases,
-		k8sClient:   k8sClient,
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
 		},
@@ -130,12 +108,10 @@ func NewPodCollector(podInformer cache.SharedIndexInformer, filter *Filter, rele
 }
 
 func (c *PodCollector) Describe(ch chan<- *prometheus.Desc) {
-	ch <- podInfoDesc
-	ch <- podReadyDesc
-	ch <- podRestartDesc
-	ch <- podEventsTotalDesc
 	ch <- inferenceLatencyDesc
+	ch <- inferenceLatencyCountDesc
 	ch <- inferenceTTFTDesc
+	ch <- inferenceTTFTCountDesc
 	ch <- inferenceRequestsDesc
 	ch <- inferenceRunningDesc
 	ch <- inferenceWaitingDesc
@@ -144,15 +120,13 @@ func (c *PodCollector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (c *PodCollector) Collect(ch chan<- prometheus.Metric) {
-	objs := c.podInformer.GetStore().List()
 	releases := c.releases.GetRegisteredReleases()
-
-	// Build a set of release names we care about.
 	tracked := make(map[string]bool, len(releases))
 	for name := range releases {
 		tracked[name] = true
 	}
 
+	objs := c.podInformer.GetStore().List()
 	for _, obj := range objs {
 		pod, ok := obj.(*corev1.Pod)
 		if !ok {
@@ -163,71 +137,24 @@ func (c *PodCollector) Collect(ch chan<- prometheus.Metric) {
 		}
 
 		releaseName := GetReleaseName(pod)
-		if releaseName == "" {
+		if releaseName == "" || !tracked[releaseName] {
 			continue
 		}
 
-		// ?? Pod-level metrics (real-time API Server query, NOT Informer cache) ??
-		// This matches the Webhook push path: both use API Server's current state,
-		// eliminating the inconsistency between Prometheus and push channels.
-		livePod, err := c.k8sClient.CoreV1().Pods(pod.Namespace).Get(context.TODO(), pod.Name, metav1.GetOptions{})
-		if err != nil {
-			// Pod may have been deleted; use Informer cache as fallback
-			liveInfo := ConvertToPodInfo(pod)
-			ready := float64(0)
-			if liveInfo.Ready {
-				ready = 1
-			}
-			ch <- prometheus.MustNewConstMetric(
-				podInfoDesc, prometheus.GaugeValue, 1,
-				liveInfo.Namespace, liveInfo.Name, releaseName, liveInfo.Phase, liveInfo.NodeName, liveInfo.PodIP,
-			)
-			ch <- prometheus.MustNewConstMetric(
-				podReadyDesc, prometheus.GaugeValue, ready,
-				liveInfo.Namespace, liveInfo.Name, releaseName,
-			)
-			ch <- prometheus.MustNewConstMetric(
-				podRestartDesc, prometheus.GaugeValue, float64(liveInfo.Restart),
-				liveInfo.Namespace, liveInfo.Name, releaseName,
-			)
+		info := ConvertToPodInfo(pod)
+		if !info.Ready || info.PodIP == "" {
 			continue
 		}
-		liveInfo := ConvertToPodInfo(livePod)
-		ready := float64(0)
-		if liveInfo.Ready {
-			ready = 1
-		}
 
-		ch <- prometheus.MustNewConstMetric(
-			podInfoDesc, prometheus.GaugeValue, 1,
-			liveInfo.Namespace, liveInfo.Name, releaseName, liveInfo.Phase, liveInfo.NodeName, liveInfo.PodIP,
-		)
-		ch <- prometheus.MustNewConstMetric(
-			podReadyDesc, prometheus.GaugeValue, ready,
-			liveInfo.Namespace, liveInfo.Name, releaseName,
-		)
-		ch <- prometheus.MustNewConstMetric(
-			podRestartDesc, prometheus.GaugeValue, float64(liveInfo.Restart),
-			liveInfo.Namespace, liveInfo.Name, releaseName,
-		)
-
-		// ?? AI inference metrics (active scrape) ??
-		if tracked[releaseName] && liveInfo.Ready && liveInfo.PodIP != "" {
-			c.scrapeAndEmitInferenceMetrics(ch, liveInfo, releaseName)
-		}
+		// Scrape vLLM / TGI / SGLang /metrics endpoint live.
+		c.scrapeAndEmit(ch, info, releaseName)
+		c.eventsProcessed++
 	}
-
-	// ?? Event counters ??
-	c.eventsMu.Lock()
-	ch <- prometheus.MustNewConstMetric(podEventsTotalDesc, prometheus.CounterValue, float64(c.eventsAdded), "added")
-	ch <- prometheus.MustNewConstMetric(podEventsTotalDesc, prometheus.CounterValue, float64(c.eventsModified), "modified")
-	ch <- prometheus.MustNewConstMetric(podEventsTotalDesc, prometheus.CounterValue, float64(c.eventsDeleted), "deleted")
-	c.eventsMu.Unlock()
 }
 
-// scrapeAndEmitInferenceMetrics fetches /metrics from the inference engine
-// (vLLM, TGI, etc.) and emits Prometheus metrics under the inferguard_ prefix.
-func (c *PodCollector) scrapeAndEmitInferenceMetrics(ch chan<- prometheus.Metric, info PodInfo, releaseName string) {
+// scrapeAndEmit fetches /metrics from the inference engine and emits Prometheus
+// metrics under the inferguard_ prefix.
+func (c *PodCollector) scrapeAndEmit(ch chan<- prometheus.Metric, info PodInfo, releaseName string) {
 	url := fmt.Sprintf("http://%s:%d/metrics", info.PodIP, defaultInferenceMetricsPort)
 	resp, err := c.httpClient.Get(url)
 	if err != nil {
@@ -241,13 +168,11 @@ func (c *PodCollector) scrapeAndEmitInferenceMetrics(ch chan<- prometheus.Metric
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1MB max
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return
 	}
 
-	// Parse vLLM-style Prometheus metrics (simple line-based parsing).
-	// We look for well-known metric names and extract their values.
 	lines := strings.Split(string(body), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -273,9 +198,19 @@ func (c *PodCollector) scrapeAndEmitInferenceMetrics(ch chan<- prometheus.Metric
 				inferenceLatencyDesc, prometheus.CounterValue, val,
 				info.Namespace, info.Name, releaseName, lookupLabel(labels, "model_name"),
 			)
+		case strings.HasPrefix(metricName, "vllm:time_per_output_token_seconds_count"):
+			ch <- prometheus.MustNewConstMetric(
+				inferenceLatencyCountDesc, prometheus.CounterValue, val,
+				info.Namespace, info.Name, releaseName, lookupLabel(labels, "model_name"),
+			)
 		case strings.HasPrefix(metricName, "vllm:time_to_first_token_seconds_sum"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceTTFTDesc, prometheus.CounterValue, val,
+				info.Namespace, info.Name, releaseName, lookupLabel(labels, "model_name"),
+			)
+		case strings.HasPrefix(metricName, "vllm:time_to_first_token_seconds_count"):
+			ch <- prometheus.MustNewConstMetric(
+				inferenceTTFTCountDesc, prometheus.CounterValue, val,
 				info.Namespace, info.Name, releaseName, lookupLabel(labels, "model_name"),
 			)
 		case metricName == "vllm:request_success_total" || strings.HasPrefix(metricName, "vllm:request_success_total{"):
@@ -312,8 +247,6 @@ func (c *PodCollector) scrapeAndEmitInferenceMetrics(ch chan<- prometheus.Metric
 	}
 }
 
-// extractLabels parses Prometheus metric labels from a line like:
-//   metric_name{key1="val1",key2="val2"} value
 func extractLabels(line string) map[string]string {
 	labels := make(map[string]string)
 	start := strings.Index(line, "{")
@@ -332,7 +265,6 @@ func extractLabels(line string) map[string]string {
 	return labels
 }
 
-// lookupLabel returns the label value or empty string.
 func lookupLabel(labels map[string]string, key string) string {
 	if v, ok := labels[key]; ok {
 		return v
@@ -340,20 +272,7 @@ func lookupLabel(labels map[string]string, key string) string {
 	return ""
 }
 
-func (c *PodCollector) RecordEvent(eventType PodEventType) {
-	c.eventsMu.Lock()
-	defer c.eventsMu.Unlock()
-
-	switch eventType {
-	case PodEventAdded:
-		c.eventsAdded++
-	case PodEventModified:
-		c.eventsModified++
-	case PodEventDeleted:
-		c.eventsDeleted++
-	}
-}
-
+// StartPrometheusServer registers the collector and serves /metrics.
 func StartPrometheusServer(ctx context.Context, addr string, collector *PodCollector) error {
 	registry := prometheus.NewRegistry()
 	if err := registry.Register(collector); err != nil {
@@ -372,7 +291,7 @@ func StartPrometheusServer(ctx context.Context, addr string, collector *PodColle
 		server.Shutdown(shutdownCtx)
 	}()
 
-	log.Info("Starting Prometheus metrics server", "addr", addr)
+	log.Info("Starting Prometheus metrics server (AI inference only)", "addr", addr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("prometheus server error: %w", err)
 	}

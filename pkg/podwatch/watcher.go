@@ -81,7 +81,7 @@ func (w *GlobalPodWatcher) Start(ctx context.Context) error {
 		DeleteFunc: w.handlePodDelete,
 	})
 
-	w.collector = NewPodCollector(w.podInformer, w.filter, w.releases, w.k8sClient)
+	w.collector = NewPodCollector(w.podInformer, w.filter, w.releases)
 
 	w.workerPool = NewWorkerPool(w.queue, w.k8sClient, w.collector, w.releases, w.policyEngine)
 

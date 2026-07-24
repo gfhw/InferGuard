@@ -172,9 +172,6 @@ func (w *WorkerPool) pushAndUpdateMetrics(ctx context.Context, releaseCfg *Relea
 		}
 	}
 
-	if w.collector != nil {
-		w.collector.RecordEvent(event.Type)
-	}
 }
 
 func (w *WorkerPool) updateCRStatus(ctx context.Context, releaseCfg *ReleaseConfig, releaseName string, info PodInfo, eventType PodEventType) {
