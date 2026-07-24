@@ -180,6 +180,16 @@ func (r *ReleaseRegistry) Unregister(releaseName string) {
 	delete(r.entries, releaseName)
 }
 
+func (r *ReleaseRegistry) GetRegisteredReleases() map[string]*ReleaseConfig {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	copied := make(map[string]*ReleaseConfig, len(r.entries))
+	for k, v := range r.entries {
+		copied[k] = v
+	}
+	return copied
+}
+
 func (r *ReleaseRegistry) Get(releaseName string) *ReleaseConfig {
 	r.mu.Lock()
 	defer r.mu.Unlock()
