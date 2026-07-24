@@ -86,6 +86,29 @@ func (s *EventSender) Send(ctx context.Context, event PodEvent) error {
 	return nil
 }
 
+// SendRaw posts a raw JSON string directly — used for user-defined alert bodies.
+func (s *EventSender) SendRaw(ctx context.Context, rawJSON string) error {
+	if s.endpoint == "" || rawJSON == "" {
+		return nil
+	}
+	req, err := http.NewRequestWithContext(ctx, s.method, s.endpoint, strings.NewReader(rawJSON))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	for k, v := range s.headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send raw alert: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("raw alert push failed with status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func (s *EventSender) UpdateConfig(endpoint string, method string, headers map[string]string) {
 	if endpoint != "" {
 		s.endpoint = endpoint
