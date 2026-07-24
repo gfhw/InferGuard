@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"flag"
 	"os"
 	"time"
@@ -13,12 +12,10 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	helmrelease "helm.sh/helm/v3/pkg/release"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	helmv1alpha1 "github.com/gfhw/inferguard/api/v1alpha1"
 	"github.com/gfhw/inferguard/internal/controller"
-	"github.com/gfhw/inferguard/internal/helm"
 	"github.com/gfhw/inferguard/pkg/podwatch"
 	"github.com/gfhw/inferguard/pkg/policy"
 )
@@ -74,45 +71,8 @@ func main() {
 	}
 
 	policyEngine := policy.NewEngine(
-		func(ctx context.Context, releaseName, namespace string, revision int) (string, error) {
-			helmMgr := helm.NewManager()
-			var rel *helmrelease.Release
-			rel, err = helmMgr.GetRelease(releaseName, namespace)
-			if err != nil {
-				return "", fmt.Errorf("cannot check release: %w", err)
-			}
-			if rel.Version <= 1 {
-				return "", fmt.Errorf("no previous revision (current: %d)", rel.Version)
-			}
-			if err := helmMgr.Rollback(releaseName, namespace, revision, 5*time.Minute); err != nil {
-				return "", err
-			}
-			rel, err = helmMgr.GetRelease(releaseName, namespace)
-			if err != nil {
-				return "", err
-			}
-			if rel.Chart != nil && rel.Chart.Metadata != nil {
-				return rel.Chart.Metadata.Version, nil
-			}
-			return "", nil
-		},
 		func(ctx context.Context, releaseName, message string) error {
 			setupLog.Info("Policy triggered", "release", releaseName, "message", message)
-			return nil
-		},
-		func(ctx context.Context, releaseName, namespace, newVersion string) error {
-			hrList := &helmv1alpha1.ModelReleaseList{}
-			if err := mgr.GetClient().List(ctx, hrList); err != nil {
-				return err
-			}
-			for i := range hrList.Items {
-				if hrList.Items[i].GetReleaseName() == releaseName {
-					fresh := hrList.Items[i].DeepCopy()
-					fresh.Spec.Chart.Version = newVersion
-					fresh.Spec.TargetRevision = ""
-					return mgr.GetClient().Update(ctx, fresh)
-				}
-			}
 			return nil
 		},
 	)
@@ -145,3 +105,4 @@ func main() {
 		os.Exit(1)
 	}
 }
+

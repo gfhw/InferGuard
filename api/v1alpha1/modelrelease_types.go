@@ -1,4 +1,4 @@
-package v1alpha1
+﻿package v1alpha1
 
 import (
 	"fmt"
@@ -24,7 +24,7 @@ type ModelReleaseSpec struct {
 	// Pod monitor configuration
 	PodMonitor PodMonitorSpec `json:"podMonitor,omitempty"`
 
-	// Policies: auto-remediation rules (e.g. auto-rollback on crash)
+	// Policies: alerting rules (condition -> Webhook notification)
 	Policies []PolicySpec `json:"policies,omitempty"`
 }
 
@@ -43,9 +43,6 @@ type PodMonitorSpec struct {
 	Headers  map[string]string `json:"headers,omitempty"`
 
 	PrometheusAddr string `json:"prometheusAddr,omitempty"`
-	// AutoRemediation enables policy-driven auto-rollback when pods crash.
-	// Defaults to false -- pod status is only written to CR, no automatic rollback.
-	AutoRemediation bool `json:"autoRemediation,omitempty"`
 
 	// Event filter configuration
 	Filter *EventFilterSpec `json:"filter,omitempty"`
@@ -66,8 +63,6 @@ type PolicyCondition struct {
 }
 
 type PolicyAction struct {
-	Type         string `json:"type"`
-	Revision     int    `json:"revision,omitempty"`
 	TriggerCount int32  `json:"triggerCount,omitempty"`
 	AlertBody    string `json:"alertBody,omitempty"`
 }
@@ -103,8 +98,8 @@ type ModelReleaseStatus struct {
 	LastAttemptedGeneration int64  `json:"lastAttemptedGeneration,omitempty"`
 	RetryCount              int    `json:"retryCount,omitempty"`
 	LastFailureMessage      string `json:"lastFailureMessage,omitempty"`
-	LastTargetRevision string `json:"lastTargetRevision,omitempty"`
-	Notes              string `json:"notes,omitempty"`
+	LastTargetRevision      string `json:"lastTargetRevision,omitempty"`
+	Notes                   string `json:"notes,omitempty"`
 
 	// Real-time pod runtime status
 	PodStatuses []PodRuntimeStatus `json:"podStatuses,omitempty"`
@@ -225,16 +220,16 @@ func (in *ModelReleaseList) DeepCopyInto(out *ModelReleaseList) {
 }
 
 const (
-	PhasePending    = "Pending"
-	PhaseInstalling = "Installing"
-	PhaseUpgrading  = "Upgrading"
-	PhaseRunning    = "Running"
-	PhaseFailed         = "Failed"
+	PhasePending         = "Pending"
+	PhaseInstalling      = "Installing"
+	PhaseUpgrading       = "Upgrading"
+	PhaseRunning         = "Running"
+	PhaseFailed          = "Failed"
 	PhaseUninstallFailed = "UninstallFailed"
 
 	MaxPermanentRetries = 1
 	MaxTransientRetries = 10
-	MaxRetries           = MaxTransientRetries
+	MaxRetries          = MaxTransientRetries
 )
 
 const (
@@ -319,3 +314,4 @@ func (in *ModelRelease) IsStable() bool {
 		in.Status.ObservedGeneration == in.Generation &&
 		in.Status.LastAttemptedGeneration == in.Generation
 }
+

@@ -1,4 +1,4 @@
-package podwatch
+﻿package podwatch
 
 import (
 	"context"
@@ -73,7 +73,7 @@ func (w *WorkerPool) processOnePod(ctx context.Context, pod *PendingPod) {
 		return
 	}
 
-	// Informer already told us it's deleted — trust it, no API call needed.
+	// Informer already told us it's deleted 锟?trust it, no API call needed.
 	if pod.EventType == PodEventDeleted {
 		// Apply per-release event filter.
 		if releaseCfg.Filter != nil && !releaseCfg.Filter.ShouldPush(pod.PodInfo, PodEventDeleted) {
@@ -117,7 +117,7 @@ func (w *WorkerPool) processOnePod(ctx context.Context, pod *PendingPod) {
 		return
 	}
 
-	// Pod exists — push event with API's current state.
+	// Pod exists 锟?push event with API's current state.
 	liveInfo := ConvertToPodInfo(livePod)
 
 	// Apply per-release event filter.
@@ -143,7 +143,7 @@ func (w *WorkerPool) processOnePod(ctx context.Context, pod *PendingPod) {
 	w.updateCRStatus(ctx, releaseCfg, pod.ReleaseName, liveInfo, event.Type)
 
 	// Policy engine: evaluate auto-remediation rules (only if user explicitly enabled).
-	if w.policyEngine != nil && releaseCfg.AutoRemediation {
+	if w.policyEngine != nil {
 		results := w.policyEngine.Evaluate(ctx, pod.ReleaseName, pod.Namespace,
 			policy.PodState{
 				Namespace: liveInfo.Namespace,
@@ -155,7 +155,7 @@ func (w *WorkerPool) processOnePod(ctx context.Context, pod *PendingPod) {
 
 		// Push Notify results via EventSender (raw user-defined JSON).
 		for _, r := range results {
-			if r.ActionTaken == "notify" && releaseCfg.EventSender != nil {
+			if releaseCfg.EventSender != nil {
 				body := expandAlertVars(r.AlertBody, liveInfo, pod.ReleaseName, nil)
 				if err := releaseCfg.EventSender.SendRaw(ctx, body); err != nil {
 					log.ErrorE(err, "Failed to push policy alert",
@@ -199,3 +199,4 @@ func (w *WorkerPool) updateCRStatus(ctx context.Context, releaseCfg *ReleaseConf
 			"namespace", info.Namespace)
 	}
 }
+

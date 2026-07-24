@@ -1,4 +1,4 @@
-package podwatch
+﻿package podwatch
 
 import (
 	"context"
@@ -160,12 +160,12 @@ func (c *PodCollector) Collect(ch chan<- prometheus.Metric) {
 		// Evaluate AI-metrics-based policies (e.g. InferenceLatency > threshold -> rollback/notify)
 		if c.policyEngine != nil && inferenceState != nil {
 			releaseCfg := releases[releaseName]
-			if releaseCfg != nil && releaseCfg.AutoRemediation {
+			if releaseCfg != nil {
 				results := c.policyEngine.EvaluateInference(context.TODO(),
 					releaseName, info.Namespace, *inferenceState, releaseCfg.Policies)
 
 				for _, r := range results {
-					if r.ActionTaken == "notify" && releaseCfg.EventSender != nil {
+					if releaseCfg.EventSender != nil {
 						body := expandAlertVars(r.AlertBody, info, releaseName, inferenceState)
 						_ = releaseCfg.EventSender.SendRaw(context.TODO(), body)
 					}
@@ -330,3 +330,5 @@ func StartPrometheusServer(ctx context.Context, addr string, collector *PodColle
 	}
 	return nil
 }
+
+

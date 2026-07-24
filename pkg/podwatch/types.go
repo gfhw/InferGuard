@@ -1,4 +1,4 @@
-package podwatch
+﻿package podwatch
 
 import (
 	"context"
@@ -106,16 +106,15 @@ type StatusUpdater interface {
 	UpdatePodStatus(ctx context.Context, releaseName string, pod PodInfo, eventType PodEventType) error
 }
 
-// ReleaseConfig holds per-release sender and status updater configuration.
+// ReleaseConfig holds per-release sender and status updater configuration..
 type ReleaseConfig struct {
 	EventSender   *EventSender
 	StatusUpdater StatusUpdater
-	Filter          *ReleaseFilter
-	Policies        []helmv1alpha1.PolicySpec
-	AutoRemediation bool
+	Filter        *ReleaseFilter
+	Policies      []helmv1alpha1.PolicySpec
 }
 
-// ReleaseRegistry maps releaseName → ReleaseConfig.
+// ReleaseRegistry maps releaseName -> ReleaseConfig.
 // ReleaseFilter mirrors EventFilterSpec at runtime for per-release event filtering.
 type ReleaseFilter struct {
 	OnUnhealthyOnly  bool
@@ -195,5 +194,7 @@ func (r *ReleaseRegistry) Get(releaseName string) *ReleaseConfig {
 	defer r.mu.Unlock()
 	return r.entries[releaseName]
 }
+
+
 
 

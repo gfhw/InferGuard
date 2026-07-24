@@ -134,11 +134,7 @@ func (w *GlobalPodWatcher) SetPolicyEngine(engine *policy.Engine) {
 	}
 }
 
-func (w *GlobalPodWatcher) MarkReleaseRolledBack(releaseName string) {
-	if w.policyEngine != nil {
-		w.policyEngine.MarkRolledBack(releaseName)
-	}
-}
+
 
 func (w *GlobalPodWatcher) UnregisterRelease(releaseName string) {
 	w.releases.Unregister(releaseName)
@@ -226,3 +222,4 @@ func (w *GlobalPodWatcher) handlePodDelete(obj interface{}) {
 func (w *GlobalPodWatcher) GetQueueSize() int {
 	return w.queue.Size()
 }
+

@@ -86,7 +86,7 @@ func (r *ModelReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				if deletionRetries >= helmv1alpha1.MaxTransientRetries {
 					inferguardlog.Info("Helm uninstall failed after max retries, keeping CR as tombstone. Fix the underlying issue, then delete again.",
 						"release", hr.GetReleaseName(), "retries", deletionRetries, "error", err.Error())
-					// CR stays with finalizer — it blocks deletion but preserves visibility.
+					// CR stays with finalizer �?it blocks deletion but preserves visibility.
 					// User must fix the Helm release and re-delete the CR.
 					return ctrl.Result{}, nil
 				}
@@ -100,7 +100,7 @@ func (r *ModelReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	// Stable: spec unchanged and already Running — nothing to do.
+	// Stable: spec unchanged and already Running �?nothing to do.
 	if hr.IsStable() {
 		return ctrl.Result{}, nil
 	}
@@ -135,7 +135,7 @@ func (r *ModelReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{RequeueAfter: backoff}, nil
 	}
 
-	// Success — no periodic requeue. Wait for spec change.
+	// Success �?no periodic requeue. Wait for spec change.
 	return ctrl.Result{}, nil
 }
 
@@ -285,7 +285,7 @@ func (r *ModelReleaseReconciler) managePodMonitor(ctx context.Context, hr *helmv
 		},
 		Filter: releaseFilter,
 		Policies: hr.Spec.Policies,
-		AutoRemediation: hr.Spec.PodMonitor.AutoRemediation,
+		
 	})
 
 	r.releaseNames[key] = releaseName

@@ -3,7 +3,6 @@ package policy
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 
 	helmv1alpha1 "github.com/gfhw/inferguard/api/v1alpha1"
@@ -20,48 +19,35 @@ type PodState struct {
 
 // InferenceState holds AI-specific metrics for policy evaluation.
 type InferenceState struct {
-	Namespace        string
-	Name             string
-	LatencySumSec    float64
-	LatencyCount     float64
-	GPUCachePct      float64
-	RequestsWaiting  int32
+	Namespace       string
+	Name            string
+	LatencySumSec   float64
+	LatencyCount    float64
+	GPUCachePct     float64
+	RequestsWaiting int32
 }
 
-// RollbackFunc is called when a policy triggers a rollback action.
-type RollbackFunc func(ctx context.Context, releaseName, namespace string, revision int) (newVersion string, err error)
-
-// NotifyFunc is called for notification-only policy actions.
+// NotifyFunc is called when a policy triggers an alert notification.
 type NotifyFunc func(ctx context.Context, releaseName, message string) error
 
-// AfterRollbackFunc is called after a successful policy-triggered rollback to sync CR spec.
-type AfterRollbackFunc func(ctx context.Context, releaseName, namespace, newVersion string) error
-
-// Engine evaluates policies and executes actions.
+// Engine evaluates policies and executes alert notifications.
 type Engine struct {
-	rollback       RollbackFunc
 	notify         NotifyFunc
-	afterRollback  AfterRollbackFunc
-	rolledBack     map[string]bool
 	conditionCount map[string]int32
 	mu             sync.Mutex
 }
 
 // PolicyResult records the outcome of a policy evaluation.
 type PolicyResult struct {
-	PolicyName  string
-	Triggered   bool
-	ActionTaken string
-	Message     string
-	AlertBody   string
+	PolicyName string
+	Triggered  bool
+	Message    string
+	AlertBody  string
 }
 
-func NewEngine(rollbackFn RollbackFunc, notifyFn NotifyFunc, afterRollbackFn AfterRollbackFunc) *Engine {
+func NewEngine(notifyFn NotifyFunc) *Engine {
 	return &Engine{
-		rollback:       rollbackFn,
 		notify:         notifyFn,
-		afterRollback:  afterRollbackFn,
-		rolledBack:     make(map[string]bool),
 		conditionCount: make(map[string]int32),
 	}
 }
@@ -82,12 +68,7 @@ func (e *Engine) EvaluateInference(ctx context.Context, releaseName, namespace s
 	})
 }
 
-// MarkRolledBack tells the engine a rollback was performed (user or policy).
-func (e *Engine) MarkRolledBack(releaseName string) {
-	e.rolledBack[releaseName] = true
-}
-
-// evaluate is the shared loop: condition counting + action execution.
+// evaluate is the shared loop: condition counting + alert notification.
 func (e *Engine) evaluate(ctx context.Context, releaseName, namespace string,
 	policies []helmv1alpha1.PolicySpec, matchFn func(helmv1alpha1.PolicySpec) bool) []PolicyResult {
 
@@ -110,7 +91,7 @@ func (e *Engine) evaluate(ctx context.Context, releaseName, namespace string,
 			continue
 		}
 
-		// triggerCount defaults to 1 — fires immediately on first match.
+		// triggerCount defaults to 1 �� fires immediately on first match.
 		triggerCount := p.Action.TriggerCount
 		if triggerCount <= 0 {
 			triggerCount = 1
@@ -131,38 +112,6 @@ func (e *Engine) evaluate(ctx context.Context, releaseName, namespace string,
 			Triggered:  true,
 			Message:    alertMsg,
 			AlertBody:  p.Action.AlertBody,
-		}
-
-		switch p.Action.Type {
-		case "Rollback":
-			if e.rolledBack[releaseName] {
-				result.Triggered = false
-				result.Message = "skipped: already rolled back once"
-				results = append(results, result)
-				continue
-			}
-			if e.rollback != nil {
-				newVer, err := e.rollback(ctx, releaseName, namespace, 0)
-				if err != nil {
-					result.ActionTaken = "rollback-failed"
-					result.Message = err.Error()
-					// No previous revision — mark as done, no point retrying.
-					if strings.Contains(err.Error(), "no previous revision") {
-						e.rolledBack[releaseName] = true
-					}
-				} else {
-					e.rolledBack[releaseName] = true
-					result.ActionTaken = "rollback"
-					result.Message = "rolled back to " + newVer
-					if e.afterRollback != nil {
-						e.afterRollback(ctx, releaseName, namespace, newVer)
-					}
-				}
-			}
-		case "Notify", "":
-			result.ActionTaken = "notify"
-		default:
-			result.ActionTaken = "notify"
 		}
 
 		results = append(results, result)
