@@ -3,6 +3,7 @@ package podwatch
 import (
 	"context"
 	"fmt"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strconv"
@@ -167,13 +168,12 @@ func (c *PodCollector) Collect(ch chan<- prometheus.Metric) {
 				for _, r := range results {
 					if r.ActionTaken == "notify" && releaseCfg.EventSender != nil {
 						alertEvent := PodEvent{
-							Type:         PodEventModified,
-							Pod:          info,
-							Namespace:    info.Namespace,
-							ReleaseName:  releaseName,
-							Timestamp:    time.Now().Unix(),
-							AlertTitle:   r.PolicyName,
-							AlertMessage: r.Message,
+							Type:        PodEventModified,
+							Pod:         info,
+							Namespace:   info.Namespace,
+							ReleaseName: releaseName,
+							Timestamp:   time.Now().Unix(),
+							AlertBody:   json.RawMessage(r.AlertBody),
 						}
 						_ = releaseCfg.EventSender.Send(context.TODO(), alertEvent)
 					}

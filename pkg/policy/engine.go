@@ -51,7 +51,7 @@ type PolicyResult struct {
 	Triggered   bool
 	ActionTaken string
 	Message     string
-	AlertTitle  string
+	AlertBody   string
 }
 
 func NewEngine(rollbackFn RollbackFunc, notifyFn NotifyFunc, afterRollbackFn AfterRollbackFunc) *Engine {
@@ -122,16 +122,13 @@ func (e *Engine) evaluate(ctx context.Context, releaseName, namespace string,
 		e.conditionCount[key] = 0
 		e.mu.Unlock()
 
-		alertMsg := p.Condition.AlertMessage
-		if alertMsg == "" {
-			alertMsg = fmt.Sprintf("%s: %s on %s", p.Condition.Type, p.Name, releaseName)
-		}
+		alertMsg := fmt.Sprintf("%s: %s on %s", p.Condition.Type, p.Name, releaseName)
 
 		result := PolicyResult{
 			PolicyName: p.Name,
 			Triggered:  true,
 			Message:    alertMsg,
-			AlertTitle: p.Action.AlertTitle,
+			AlertBody:  p.Action.AlertBody,
 		}
 
 		switch p.Action.Type {

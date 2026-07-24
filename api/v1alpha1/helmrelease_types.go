@@ -59,18 +59,17 @@ type EventFilterSpec struct {
 }
 
 type PolicyCondition struct {
-	Type         string `json:"type"`
-	Threshold    int32  `json:"threshold"`
-	Window       string `json:"window,omitempty"`
-	Scope        string `json:"scope,omitempty"`
-	AlertMessage string `json:"alertMessage,omitempty"`
+	Type      string `json:"type"`
+	Threshold int32  `json:"threshold"`
+	Window    string `json:"window,omitempty"`
+	Scope     string `json:"scope,omitempty"`
 }
 
 type PolicyAction struct {
 	Type         string `json:"type"`
 	Revision     int    `json:"revision,omitempty"`
 	TriggerCount int32  `json:"triggerCount,omitempty"`
-	AlertTitle   string `json:"alertTitle,omitempty"`
+	AlertBody    string `json:"alertBody,omitempty"`
 }
 
 type PolicySpec struct {

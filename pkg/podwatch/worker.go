@@ -2,6 +2,7 @@ package podwatch
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -157,13 +158,12 @@ func (w *WorkerPool) processOnePod(ctx context.Context, pod *PendingPod) {
 		for _, r := range results {
 			if r.ActionTaken == "notify" && releaseCfg.EventSender != nil {
 				alertEvent := PodEvent{
-					Type:         PodEventModified,
-					Pod:          liveInfo,
-					Namespace:    pod.Namespace,
-					ReleaseName:  pod.ReleaseName,
-					Timestamp:    time.Now().Unix(),
-					AlertTitle:   r.AlertTitle,
-					AlertMessage: r.Message,
+					Type:        PodEventModified,
+					Pod:         liveInfo,
+					Namespace:   pod.Namespace,
+					ReleaseName: pod.ReleaseName,
+					Timestamp:   time.Now().Unix(),
+					AlertBody:   json.RawMessage(r.AlertBody),
 				}
 				if err := releaseCfg.EventSender.Send(ctx, alertEvent); err != nil {
 					log.ErrorE(err, "Failed to push policy alert",

@@ -2,6 +2,7 @@ package podwatch
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 
 	helmv1alpha1 "github.com/gfhw/inferguard/api/v1alpha1"
@@ -69,14 +70,13 @@ type PendingPod struct {
 }
 
 type PodEvent struct {
-	Type         PodEventType `json:"type"`
-	Pod          PodInfo      `json:"pod,omitempty"`
-	OldPod       PodInfo      `json:"oldPod,omitempty"`
-	Namespace    string       `json:"namespace,omitempty"`
-	ReleaseName  string       `json:"releaseName,omitempty"`
-	Timestamp    int64        `json:"timestamp"`
-	AlertTitle   string       `json:"alertTitle,omitempty"`
-	AlertMessage string       `json:"alertMessage,omitempty"`
+	Type        PodEventType     `json:"type"`
+	Pod         PodInfo          `json:"pod,omitempty"`
+	OldPod      PodInfo          `json:"oldPod,omitempty"`
+	Namespace   string           `json:"namespace,omitempty"`
+	ReleaseName string           `json:"releaseName,omitempty"`
+	Timestamp   int64            `json:"timestamp"`
+	AlertBody   json.RawMessage  `json:"alert,omitempty"`
 }
 
 type PodStatus struct {
