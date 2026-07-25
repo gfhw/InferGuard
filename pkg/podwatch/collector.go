@@ -159,8 +159,7 @@ func (c *PodCollector) Collect(ch chan<- prometheus.Metric) {
 		}
 
 		// Scrape vLLM / TGI / SGLang /metrics endpoint live.
-		engine := detectEngine(pod)
-		inferenceState := c.scrapeAndEmit(ch, info, releaseName, releaseCfg.Revision, engine)
+		inferenceState := c.scrapeAndEmit(ch, info, releaseName, releaseCfg.Revision)
 		c.eventsProcessed++
 
 		// Evaluate AI-metrics-based policies (e.g. InferenceLatency > threshold -> notify)
@@ -180,7 +179,7 @@ func (c *PodCollector) Collect(ch chan<- prometheus.Metric) {
 
 // scrapeAndEmit fetches /metrics from the inference engine and emits Prometheus
 // metrics under the inferguard_ prefix.
-func (c *PodCollector) scrapeAndEmit(ch chan<- prometheus.Metric, info PodInfo, releaseName string, revision int, engine string) *policy.InferenceState {
+func (c *PodCollector) scrapeAndEmit(ch chan<- prometheus.Metric, info PodInfo, releaseName string, revision int) *policy.InferenceState {
 	url := fmt.Sprintf("http://%s:%d/metrics", info.PodIP, defaultInferenceMetricsPort)
 	resp, err := c.httpClient.Get(url)
 	if err != nil {
@@ -199,6 +198,7 @@ func (c *PodCollector) scrapeAndEmit(ch chan<- prometheus.Metric, info PodInfo, 
 		return nil
 	}
 
+	engine := detectEngine(string(body))
 	lines := strings.Split(string(body), "\n")
     
     state := &policy.InferenceState{
@@ -390,15 +390,12 @@ func StartPrometheusServer(ctx context.Context, addr string, collector *PodColle
 
 
 
-func detectEngine(pod *corev1.Pod) string {
-	if pod.Labels != nil {
-		name := pod.Labels["app.kubernetes.io/name"]
-		if strings.Contains(name, "tgi") || strings.Contains(name, "text-generation-inference") {
-			return "tgi"
-		}
-		if strings.Contains(name, "sglang") {
-			return "sglang"
-		}
+func detectEngine(metricsBody string) string {
+	if strings.Contains(metricsBody, "tgi_") {
+		return "tgi"
+	}
+	if strings.Contains(metricsBody, "sglang:") {
+		return "sglang"
 	}
 	return "vllm"
 }
