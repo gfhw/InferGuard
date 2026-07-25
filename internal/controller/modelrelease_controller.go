@@ -170,9 +170,9 @@ func (r *ModelReleaseReconciler) performInstallOrUpgrade(ctx context.Context, hr
 
 	var rel *helmrelease.Release
 	if hr.Spec.Chart.LocalPath != "" {
-		rel, err = r.HelmManager.InstallFromLocal(ctx, releaseName, releaseNs, hr.Spec.Chart.LocalPath, values, hr.GetWaitTimeout(), hr.ShouldForceUpgrade(), hr.ShouldAtomic())
+		rel, err = r.HelmManager.InstallFromLocal(ctx, releaseName, releaseNs, hr.Spec.Chart.LocalPath, values, hr.GetWaitTimeout(), hr.ShouldForceUpgrade(), hr.ShouldAtomic(), hr.ShouldWait())
 	} else {
-		rel, err = r.HelmManager.InstallOrUpgrade(ctx, releaseName, releaseNs, hr.Spec.Chart.Repository, hr.Spec.Chart.Name, hr.Spec.Chart.Version, values, hr.GetWaitTimeout(), hr.ShouldForceUpgrade(), hr.ShouldAtomic())
+		rel, err = r.HelmManager.InstallOrUpgrade(ctx, releaseName, releaseNs, hr.Spec.Chart.Repository, hr.Spec.Chart.Name, hr.Spec.Chart.Version, values, hr.GetWaitTimeout(), hr.ShouldForceUpgrade(), hr.ShouldAtomic(), hr.ShouldWait())
 	}
 	if err != nil {
 

@@ -19,6 +19,8 @@ type ModelReleaseSpec struct {
 	TargetRevision string `json:"targetRevision,omitempty"`
 	ForceUpgrade   bool   `json:"forceUpgrade,omitempty"`
 	Atomic         bool   `json:"atomic,omitempty"`
+	// Wait for pods to be ready after install/upgrade. Defaults to true.
+	Wait           *bool  `json:"wait,omitempty"`
 	WaitTimeout    int64  `json:"waitTimeout,omitempty"`
 
 	// Pod monitor configuration
@@ -297,6 +299,13 @@ func (in *ModelRelease) ShouldForceUpgrade() bool {
 
 func (in *ModelRelease) ShouldAtomic() bool {
 	return in.Spec.Atomic
+}
+
+func (in *ModelRelease) ShouldWait() bool {
+	if in.Spec.Wait == nil {
+		return true // default: wait
+	}
+	return *in.Spec.Wait
 }
 
 func (in *ModelRelease) GetWaitTimeout() time.Duration {

@@ -45,7 +45,7 @@ func (m *Manager) newActionConfig(namespace string) (*action.Configuration, erro
 	return cfg, nil
 }
 
-func (m *Manager) InstallOrUpgrade(ctx context.Context, releaseName, namespace, repoURL, chartName, chartVersion string, values map[string]interface{}, waitTimeout time.Duration, force bool, atomic bool) (*release.Release, error) {
+func (m *Manager) InstallOrUpgrade(ctx context.Context, releaseName, namespace, repoURL, chartName, chartVersion string, values map[string]interface{}, waitTimeout time.Duration, force bool, atomic bool, wait bool) (*release.Release, error) {
 	cfg, err := m.newActionConfig(namespace)
 	if err != nil {
 		return nil, err
@@ -68,12 +68,12 @@ func (m *Manager) InstallOrUpgrade(ctx context.Context, releaseName, namespace, 
 	}
 
 	if existing != nil {
-		return m.upgrade(cfg, releaseName, chart, values, waitTimeout, force, atomic)
+		return m.upgrade(cfg, releaseName, chart, values, waitTimeout, force, atomic, wait)
 	}
-	return m.install(cfg, releaseName, namespace, chart, values, waitTimeout)
+	return m.install(cfg, releaseName, namespace, chart, values, waitTimeout, wait)
 }
 
-func (m *Manager) InstallFromLocal(ctx context.Context, releaseName, namespace, localPath string, values map[string]interface{}, waitTimeout time.Duration, force bool, atomic bool) (*release.Release, error) {
+func (m *Manager) InstallFromLocal(ctx context.Context, releaseName, namespace, localPath string, values map[string]interface{}, waitTimeout time.Duration, force bool, atomic bool, wait bool) (*release.Release, error) {
 	cfg, err := m.newActionConfig(namespace)
 	if err != nil {
 		return nil, err
@@ -90,25 +90,25 @@ func (m *Manager) InstallFromLocal(ctx context.Context, releaseName, namespace, 
 	}
 
 	if existing != nil {
-		return m.upgrade(cfg, releaseName, chart, values, waitTimeout, force, atomic)
+		return m.upgrade(cfg, releaseName, chart, values, waitTimeout, force, atomic, wait)
 	}
-	return m.install(cfg, releaseName, namespace, chart, values, waitTimeout)
+	return m.install(cfg, releaseName, namespace, chart, values, waitTimeout, wait)
 }
 
-func (m *Manager) install(cfg *action.Configuration, releaseName, namespace string, ch *chart.Chart, values map[string]interface{}, waitTimeout time.Duration) (*release.Release, error) {
+func (m *Manager) install(cfg *action.Configuration, releaseName, namespace string, ch *chart.Chart, values map[string]interface{}, waitTimeout time.Duration, wait bool) (*release.Release, error) {
 	client := action.NewInstall(cfg)
 	client.ReleaseName = releaseName
 	client.Namespace = namespace
 	client.CreateNamespace = true
-	client.Wait = true
+	client.Wait = wait
 	client.Timeout = waitTimeout
 
 	return client.Run(ch, values)
 }
 
-func (m *Manager) upgrade(cfg *action.Configuration, releaseName string, ch *chart.Chart, values map[string]interface{}, waitTimeout time.Duration, force bool, atomic bool) (*release.Release, error) {
+func (m *Manager) upgrade(cfg *action.Configuration, releaseName string, ch *chart.Chart, values map[string]interface{}, waitTimeout time.Duration, force bool, atomic bool, wait bool) (*release.Release, error) {
 	client := action.NewUpgrade(cfg)
-	client.Wait = true
+	client.Wait = wait
 	client.Timeout = waitTimeout
 	client.Force = force
 	client.Atomic = atomic
