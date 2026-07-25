@@ -223,3 +223,7 @@ func (w *GlobalPodWatcher) GetQueueSize() int {
 	return w.queue.Size()
 }
 
+
+func (w *GlobalPodWatcher) UpdateReleaseRevision(releaseName string, revision int) {
+	w.releases.UpdateRevision(releaseName, revision)
+}

@@ -196,6 +196,9 @@ func (r *ModelReleaseReconciler) performInstallOrUpgrade(ctx context.Context, hr
 	if err := r.updateStatusSuccess(ctx, hr, rel); err != nil {
 		return err
 	}
+	if rel != nil {
+		r.Watcher.UpdateReleaseRevision(hr.GetReleaseName(), rel.Version)
+	}
 
 	return r.managePodMonitor(ctx, hr)
 }

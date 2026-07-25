@@ -112,6 +112,7 @@ type ReleaseConfig struct {
 	StatusUpdater StatusUpdater
 	Filter        *ReleaseFilter
 	Policies      []helmv1alpha1.PolicySpec
+	Revision      int
 }
 
 // ReleaseRegistry maps releaseName -> ReleaseConfig.
@@ -198,3 +199,12 @@ func (r *ReleaseRegistry) Get(releaseName string) *ReleaseConfig {
 
 
 
+
+
+func (r *ReleaseRegistry) UpdateRevision(releaseName string, revision int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if cfg, ok := r.entries[releaseName]; ok {
+		cfg.Revision = revision
+	}
+}
