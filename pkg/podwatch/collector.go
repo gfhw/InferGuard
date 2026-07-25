@@ -32,55 +32,55 @@ var (
 	inferenceLatencyDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(metricsNamespace, "", "inference_latency_seconds"),
 		"Per-output-token generation latency sum (divide by _count for avg)",
-		[]string{"namespace", "pod", "release", "revision", "model"},
+		[]string{"namespace", "pod", "release", "revision", "engine", "model"},
 		nil,
 	)
 	inferenceLatencyCountDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(metricsNamespace, "", "inference_latency_seconds_count"),
 		"Per-output-token generation latency count",
-		[]string{"namespace", "pod", "release", "revision", "model"},
+		[]string{"namespace", "pod", "release", "revision", "engine", "model"},
 		nil,
 	)
 	inferenceTTFTDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(metricsNamespace, "", "inference_time_to_first_token_seconds"),
 		"Time-to-first-token latency sum",
-		[]string{"namespace", "pod", "release", "revision", "model"},
+		[]string{"namespace", "pod", "release", "revision", "engine", "model"},
 		nil,
 	)
 	inferenceTTFTCountDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(metricsNamespace, "", "inference_time_to_first_token_seconds_count"),
 		"Time-to-first-token latency count",
-		[]string{"namespace", "pod", "release", "revision", "model"},
+		[]string{"namespace", "pod", "release", "revision", "engine", "model"},
 		nil,
 	)
 	inferenceRequestsDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(metricsNamespace, "", "inference_requests_total"),
 		"Total successful inference requests",
-		[]string{"namespace", "pod", "release", "revision", "model"},
+		[]string{"namespace", "pod", "release", "revision", "engine", "model"},
 		nil,
 	)
 	inferenceRunningDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(metricsNamespace, "", "inference_requests_running"),
 		"Currently running inference requests",
-		[]string{"namespace", "pod", "release", "revision"},
+		[]string{"namespace", "pod", "release", "revision", "engine"},
 		nil,
 	)
 	inferenceWaitingDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(metricsNamespace, "", "inference_requests_waiting"),
 		"Currently waiting (queued) inference requests",
-		[]string{"namespace", "pod", "release", "revision"},
+		[]string{"namespace", "pod", "release", "revision", "engine"},
 		nil,
 	)
 	inferenceTokensDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(metricsNamespace, "", "inference_tokens_total"),
 		"Total prompt + generation tokens processed",
-		[]string{"namespace", "pod", "release", "revision", "kind"},
+		[]string{"namespace", "pod", "release", "revision", "engine", "kind"},
 		nil,
 	)
 	inferenceGPUCacheDesc = prometheus.NewDesc(
 		prometheus.BuildFQName(metricsNamespace, "", "inference_gpu_cache_usage_percent"),
 		"GPU KV-cache usage percentage",
-		[]string{"namespace", "pod", "release", "revision"},
+		[]string{"namespace", "pod", "release", "revision", "engine"},
 		nil,
 	)
 )
@@ -159,7 +159,8 @@ func (c *PodCollector) Collect(ch chan<- prometheus.Metric) {
 		}
 
 		// Scrape vLLM / TGI / SGLang /metrics endpoint live.
-		inferenceState := c.scrapeAndEmit(ch, info, releaseName, releaseCfg.Revision)
+		engine := detectEngine(pod)
+		inferenceState := c.scrapeAndEmit(ch, info, releaseName, releaseCfg.Revision, engine)
 		c.eventsProcessed++
 
 		// Evaluate AI-metrics-based policies (e.g. InferenceLatency > threshold -> notify)
@@ -179,7 +180,7 @@ func (c *PodCollector) Collect(ch chan<- prometheus.Metric) {
 
 // scrapeAndEmit fetches /metrics from the inference engine and emits Prometheus
 // metrics under the inferguard_ prefix.
-func (c *PodCollector) scrapeAndEmit(ch chan<- prometheus.Metric, info PodInfo, releaseName string, revision int) *policy.InferenceState {
+func (c *PodCollector) scrapeAndEmit(ch chan<- prometheus.Metric, info PodInfo, releaseName string, revision int, engine string) *policy.InferenceState {
 	url := fmt.Sprintf("http://%s:%d/metrics", info.PodIP, defaultInferenceMetricsPort)
 	resp, err := c.httpClient.Get(url)
 	if err != nil {
@@ -226,108 +227,108 @@ func (c *PodCollector) scrapeAndEmit(ch chan<- prometheus.Metric, info PodInfo, 
 		case strings.HasPrefix(metricName, "vllm:time_per_output_token_seconds_sum"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceLatencyDesc, prometheus.CounterValue, val,
-				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), lookupLabel(labels, "model_name"),
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine, lookupLabel(labels, "model_name"),
 			)
 			state.LatencySumSec = val
 		case strings.HasPrefix(metricName, "vllm:time_per_output_token_seconds_count"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceLatencyCountDesc, prometheus.CounterValue, val,
-				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), lookupLabel(labels, "model_name"),
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine, lookupLabel(labels, "model_name"),
 			)
 			state.LatencyCount = val
 		case strings.HasPrefix(metricName, "vllm:time_to_first_token_seconds_sum"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceTTFTDesc, prometheus.CounterValue, val,
-				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), lookupLabel(labels, "model_name"),
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine, lookupLabel(labels, "model_name"),
 			)
 		case strings.HasPrefix(metricName, "vllm:time_to_first_token_seconds_count"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceTTFTCountDesc, prometheus.CounterValue, val,
-				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), lookupLabel(labels, "model_name"),
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine, lookupLabel(labels, "model_name"),
 			)
 		case metricName == "vllm:request_success_total" || strings.HasPrefix(metricName, "vllm:request_success_total{"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceRequestsDesc, prometheus.CounterValue, val,
-				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), lookupLabel(labels, "model_name"),
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine, lookupLabel(labels, "model_name"),
 			)
 		case metricName == "vllm:num_requests_running" || strings.HasPrefix(metricName, "vllm:num_requests_running{"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceRunningDesc, prometheus.GaugeValue, val,
-				info.Namespace, info.Name, releaseName, strconv.Itoa(revision),
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine,
 			)
 		case metricName == "vllm:num_requests_waiting" || strings.HasPrefix(metricName, "vllm:num_requests_waiting{"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceWaitingDesc, prometheus.GaugeValue, val,
-				info.Namespace, info.Name, releaseName, strconv.Itoa(revision),
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine,
 			)
 			state.RequestsWaiting = int32(val)
 		case strings.HasPrefix(metricName, "vllm:prompt_tokens_total"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceTokensDesc, prometheus.CounterValue, val,
-				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), "prompt",
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine, "prompt",
 			)
 		case strings.HasPrefix(metricName, "vllm:generation_tokens_total"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceTokensDesc, prometheus.CounterValue, val,
-				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), "generation",
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine, "generation",
 			)
 		case metricName == "vllm:gpu_cache_usage_perc" || strings.HasPrefix(metricName, "vllm:gpu_cache_usage_perc{"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceGPUCacheDesc, prometheus.GaugeValue, val,
-				info.Namespace, info.Name, releaseName, strconv.Itoa(revision),
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine,
 			)
 			state.GPUCachePct = val
 		// TGI (Text Generation Inference) metrics
 		case strings.HasPrefix(metricName, "tgi_request_duration_seconds_sum"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceLatencyDesc, prometheus.CounterValue, val,
-				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), lookupLabel(labels, "model_name"),
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine, lookupLabel(labels, "model_name"),
 			)
 			state.LatencySumSec = val
 		case strings.HasPrefix(metricName, "tgi_request_duration_seconds_count"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceLatencyCountDesc, prometheus.CounterValue, val,
-				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), lookupLabel(labels, "model_name"),
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine, lookupLabel(labels, "model_name"),
 			)
 			state.LatencyCount = val
 		case metricName == "tgi_request_success_total" || strings.HasPrefix(metricName, "tgi_request_success_total{"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceRequestsDesc, prometheus.CounterValue, val,
-				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), lookupLabel(labels, "model_name"),
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine, lookupLabel(labels, "model_name"),
 			)
 		case metricName == "tgi_queue_size" || strings.HasPrefix(metricName, "tgi_queue_size{"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceWaitingDesc, prometheus.GaugeValue, val,
-				info.Namespace, info.Name, releaseName, strconv.Itoa(revision),
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine,
 			)
 			state.RequestsWaiting = int32(val)
 		case metricName == "tgi_batch_current_size" || strings.HasPrefix(metricName, "tgi_batch_current_size{"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceRunningDesc, prometheus.GaugeValue, val,
-				info.Namespace, info.Name, releaseName, strconv.Itoa(revision),
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine,
 			)
 		// SGLang metrics
 		case strings.HasPrefix(metricName, "sglang:time_per_output_token_seconds_sum"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceLatencyDesc, prometheus.CounterValue, val,
-				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), lookupLabel(labels, "model_name"),
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine, lookupLabel(labels, "model_name"),
 			)
 			state.LatencySumSec = val
 		case strings.HasPrefix(metricName, "sglang:time_per_output_token_seconds_count"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceLatencyCountDesc, prometheus.CounterValue, val,
-				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), lookupLabel(labels, "model_name"),
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine, lookupLabel(labels, "model_name"),
 			)
 			state.LatencyCount = val
 		case metricName == "sglang:num_requests_running" || strings.HasPrefix(metricName, "sglang:num_requests_running{"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceRunningDesc, prometheus.GaugeValue, val,
-				info.Namespace, info.Name, releaseName, strconv.Itoa(revision),
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine,
 			)
 		case metricName == "sglang:num_requests_waiting" || strings.HasPrefix(metricName, "sglang:num_requests_waiting{"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceWaitingDesc, prometheus.GaugeValue, val,
-				info.Namespace, info.Name, releaseName, strconv.Itoa(revision),
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine,
 			)
 			state.RequestsWaiting = int32(val)
 		}
@@ -387,3 +388,17 @@ func StartPrometheusServer(ctx context.Context, addr string, collector *PodColle
 }
 
 
+
+
+func detectEngine(pod *corev1.Pod) string {
+	if pod.Labels != nil {
+		name := pod.Labels["app.kubernetes.io/name"]
+		if strings.Contains(name, "tgi") || strings.Contains(name, "text-generation-inference") {
+			return "tgi"
+		}
+		if strings.Contains(name, "sglang") {
+			return "sglang"
+		}
+	}
+	return "vllm"
+}

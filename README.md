@@ -135,15 +135,15 @@ Prometheus 只暴露 AI 推理指标，Pod 状态指标请走 Webhook Push 或 C
 
 | 指标 | Labels | 说明 |
 |------|--------|------|
-| inferguard_inference_latency_seconds | namespace, pod, release, revision, model | 逐 token 生成延迟(sum) |
-| inferguard_inference_latency_seconds_count | namespace, pod, release, revision, model | 逐 token 生成延迟(count) |
-| inferguard_inference_time_to_first_token_seconds | namespace, pod, release, revision, model | TTFT 首 token 延迟(sum) |
-| inferguard_inference_time_to_first_token_seconds_count | namespace, pod, release, revision, model | TTFT 首 token 延迟(count) |
-| inferguard_inference_requests_total | namespace, pod, release, revision, model | 成功请求总数 |
-| inferguard_inference_requests_running | namespace, pod, release, revision | 当前正在处理的请求数 |
-| inferguard_inference_requests_waiting | namespace, pod, release, revision | 排队等待的请求数 |
-| inferguard_inference_tokens_total | namespace, pod, release, revision, kind | Token 总数(kind=prompt|generation) |
-| inferguard_inference_gpu_cache_usage_percent | namespace, pod, release, revision | GPU KV-Cache 使用率 |
+| inferguard_inference_latency_seconds | namespace, pod, release, revision, engine, model | 逐 token 生成延迟(sum) |
+| inferguard_inference_latency_seconds_count | namespace, pod, release, revision, engine, model | 逐 token 生成延迟(count) |
+| inferguard_inference_time_to_first_token_seconds | namespace, pod, release, revision, engine, model | TTFT 首 token 延迟(sum) |
+| inferguard_inference_time_to_first_token_seconds_count | namespace, pod, release, revision, engine, model | TTFT 首 token 延迟(count) |
+| inferguard_inference_requests_total | namespace, pod, release, revision, engine, model | 成功请求总数 |
+| inferguard_inference_requests_running | namespace, pod, release, revision, engine | 当前正在处理的请求数 |
+| inferguard_inference_requests_waiting | namespace, pod, release, revision, engine | 排队等待的请求数 |
+| inferguard_inference_tokens_total | namespace, pod, release, revision, engine, kind | Token 总数(kind=prompt|generation) |
+| inferguard_inference_gpu_cache_usage_percent | namespace, pod, release, revision, engine | GPU KV-Cache 使用率 |
 
 **工作原理**: Prometheus scrape /metrics -> InferGuard Collector 对每个已注册的推理 Pod 执行 HTTP GET podIP:8000/metrics -> 解析 vLLM 原生指标 -> 以 inferguard_ 前缀重新暴露。零额外 exporter，零 Informer 缓存依赖。
 
