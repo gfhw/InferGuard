@@ -4,14 +4,15 @@ metadata:
   labels:
     control-plane: controller-manager
     app.kubernetes.io/name: inferguard
-    app.kubernetes.io/managed-by: kustomize
   name: controller-manager-metrics-service
+  namespace: system
 spec:
   type: ClusterIP
   selector:
     control-plane: controller-manager
     app.kubernetes.io/name: inferguard
   ports:
-  - name: https
-    port: 8443
-    targetPort: https
+  - name: metrics
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
