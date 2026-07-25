@@ -277,6 +277,59 @@ func (c *PodCollector) scrapeAndEmit(ch chan<- prometheus.Metric, info PodInfo, 
 				info.Namespace, info.Name, releaseName, strconv.Itoa(revision),
 			)
 			state.GPUCachePct = val
+		// TGI (Text Generation Inference) metrics
+		case strings.HasPrefix(metricName, "tgi_request_duration_seconds_sum"):
+			ch <- prometheus.MustNewConstMetric(
+				inferenceLatencyDesc, prometheus.CounterValue, val,
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), lookupLabel(labels, "model_name"),
+			)
+			state.LatencySumSec = val
+		case strings.HasPrefix(metricName, "tgi_request_duration_seconds_count"):
+			ch <- prometheus.MustNewConstMetric(
+				inferenceLatencyCountDesc, prometheus.CounterValue, val,
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), lookupLabel(labels, "model_name"),
+			)
+			state.LatencyCount = val
+		case metricName == "tgi_request_success_total" || strings.HasPrefix(metricName, "tgi_request_success_total{"):
+			ch <- prometheus.MustNewConstMetric(
+				inferenceRequestsDesc, prometheus.CounterValue, val,
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), lookupLabel(labels, "model_name"),
+			)
+		case metricName == "tgi_queue_size" || strings.HasPrefix(metricName, "tgi_queue_size{"):
+			ch <- prometheus.MustNewConstMetric(
+				inferenceWaitingDesc, prometheus.GaugeValue, val,
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision),
+			)
+			state.RequestsWaiting = int32(val)
+		case metricName == "tgi_batch_current_size" || strings.HasPrefix(metricName, "tgi_batch_current_size{"):
+			ch <- prometheus.MustNewConstMetric(
+				inferenceRunningDesc, prometheus.GaugeValue, val,
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision),
+			)
+		// SGLang metrics
+		case strings.HasPrefix(metricName, "sglang:time_per_output_token_seconds_sum"):
+			ch <- prometheus.MustNewConstMetric(
+				inferenceLatencyDesc, prometheus.CounterValue, val,
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), lookupLabel(labels, "model_name"),
+			)
+			state.LatencySumSec = val
+		case strings.HasPrefix(metricName, "sglang:time_per_output_token_seconds_count"):
+			ch <- prometheus.MustNewConstMetric(
+				inferenceLatencyCountDesc, prometheus.CounterValue, val,
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), lookupLabel(labels, "model_name"),
+			)
+			state.LatencyCount = val
+		case metricName == "sglang:num_requests_running" || strings.HasPrefix(metricName, "sglang:num_requests_running{"):
+			ch <- prometheus.MustNewConstMetric(
+				inferenceRunningDesc, prometheus.GaugeValue, val,
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision),
+			)
+		case metricName == "sglang:num_requests_waiting" || strings.HasPrefix(metricName, "sglang:num_requests_waiting{"):
+			ch <- prometheus.MustNewConstMetric(
+				inferenceWaitingDesc, prometheus.GaugeValue, val,
+				info.Namespace, info.Name, releaseName, strconv.Itoa(revision),
+			)
+			state.RequestsWaiting = int32(val)
 		}
 	}
 	return state

@@ -239,6 +239,6 @@ curl http://localhost:9090/metrics | grep inferguard_
 - Helm 3.14+
 
 推理引擎 Prometheus 指标兼容性:
-- vLLM: 全支持
-- TGI (Text Generation Inference): 支持(指标名前缀不同)
-- SGLang: 支持(指标名前缀不同)
+- vLLM: 全支持（9 项指标）
+- TGI (Text Generation Inference): 支持请求延迟/成功率/队列深度/批处理大小
+- SGLang: 支持推理延迟/等待队列/运行请求数
