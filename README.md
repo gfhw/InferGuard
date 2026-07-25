@@ -92,6 +92,7 @@ spec:
     model: "meta-llama/Meta-Llama-3-8B-Instruct"
     replicas: 2
   # atomic: true  # 升级失败自动回滚
+  # wait: false  # 默认 true，设为 false 不等待 Pod 就绪
   podMonitor:
     enabled: true
     endpoint: "https://alerts.example.com/webhook"
@@ -134,15 +135,15 @@ Prometheus 只暴露 AI 推理指标，Pod 状态指标请走 Webhook Push 或 C
 
 | 指标 | Labels | 说明 |
 |------|--------|------|
-| inferguard_inference_latency_seconds | namespace, pod, release, model | 逐 token 生成延迟(sum) |
-| inferguard_inference_latency_seconds_count | namespace, pod, release, model | 逐 token 生成延迟(count) |
-| inferguard_inference_time_to_first_token_seconds | namespace, pod, release, model | TTFT 首 token 延迟(sum) |
-| inferguard_inference_time_to_first_token_seconds_count | namespace, pod, release, model | TTFT 首 token 延迟(count) |
-| inferguard_inference_requests_total | namespace, pod, release, model | 成功请求总数 |
-| inferguard_inference_requests_running | namespace, pod, release | 当前正在处理的请求数 |
-| inferguard_inference_requests_waiting | namespace, pod, release | 排队等待的请求数 |
-| inferguard_inference_tokens_total | namespace, pod, release, kind | Token 总数(kind=prompt|generation) |
-| inferguard_inference_gpu_cache_usage_percent | namespace, pod, release | GPU KV-Cache 使用率 |
+| inferguard_inference_latency_seconds | namespace, pod, release, revision, model | 逐 token 生成延迟(sum) |
+| inferguard_inference_latency_seconds_count | namespace, pod, release, revision, model | 逐 token 生成延迟(count) |
+| inferguard_inference_time_to_first_token_seconds | namespace, pod, release, revision, model | TTFT 首 token 延迟(sum) |
+| inferguard_inference_time_to_first_token_seconds_count | namespace, pod, release, revision, model | TTFT 首 token 延迟(count) |
+| inferguard_inference_requests_total | namespace, pod, release, revision, model | 成功请求总数 |
+| inferguard_inference_requests_running | namespace, pod, release, revision | 当前正在处理的请求数 |
+| inferguard_inference_requests_waiting | namespace, pod, release, revision | 排队等待的请求数 |
+| inferguard_inference_tokens_total | namespace, pod, release, revision, kind | Token 总数(kind=prompt|generation) |
+| inferguard_inference_gpu_cache_usage_percent | namespace, pod, release, revision | GPU KV-Cache 使用率 |
 
 **工作原理**: Prometheus scrape /metrics -> InferGuard Collector 对每个已注册的推理 Pod 执行 HTTP GET podIP:8000/metrics -> 解析 vLLM 原生指标 -> 以 inferguard_ 前缀重新暴露。零额外 exporter，零 Informer 缓存依赖。
 
@@ -179,6 +180,7 @@ Prometheus 只暴露 AI 推理指标，Pod 状态指标请走 Webhook Push 或 C
 | **单 Worker 串行消费** | 无需锁，无并发竞争，天然有序 |
 | **Prometheus 主动 scrape** | 不依赖 Informer 缓存，直接从推理引擎抓取指标 |
 | **策略只告警不自愈** | 生产环境机器决策风险太高，人决策更安全。告警推送 + 人工介入是最佳实践 |
+| **Prometheus 指标注入 Helm revision** | 业界首创将 Helm revision 作为 Prometheus label，Grafana 可按版本分组对比延迟/吞吐，升级后性能劣化一目了然 |
 | **回滚后全量对齐 spec** | 回滚后同步 chart.version + values + ObservedGeneration，避免 spec 与实际状态脱节 |
 
 ---
