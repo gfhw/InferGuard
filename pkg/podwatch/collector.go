@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 
@@ -361,31 +360,7 @@ func lookupLabel(labels map[string]string, key string) string {
 	return ""
 }
 
-// StartPrometheusServer registers the collector and serves /metrics.
-func StartPrometheusServer(ctx context.Context, addr string, collector *PodCollector) error {
-	registry := prometheus.NewRegistry()
-	if err := registry.Register(collector); err != nil {
-		return fmt.Errorf("failed to register pod collector: %w", err)
-	}
 
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
-
-	server := &http.Server{Addr: addr, Handler: mux}
-
-	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		server.Shutdown(shutdownCtx)
-	}()
-
-	log.Info("Starting Prometheus metrics server (AI inference only)", "addr", addr)
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		return fmt.Errorf("prometheus server error: %w", err)
-	}
-	return nil
-}
 
 
 

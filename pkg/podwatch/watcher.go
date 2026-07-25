@@ -19,8 +19,6 @@ import (
 type GlobalPodWatcher struct {
 	k8sClient      kubernetes.Interface
 	resyncInterval time.Duration
-	prometheusAddr string
-
 	podInformer cache.SharedIndexInformer
 
 	queue *PodEventQueue
@@ -40,11 +38,11 @@ type GlobalPodWatcher struct {
 	started bool
 }
 
-func NewGlobalPodWatcher(k8sClient kubernetes.Interface, resyncInterval time.Duration, prometheusAddr string) *GlobalPodWatcher {
+func NewGlobalPodWatcher(k8sClient kubernetes.Interface, resyncInterval time.Duration) *GlobalPodWatcher {
 	return &GlobalPodWatcher{
 		k8sClient:      k8sClient,
 		resyncInterval: resyncInterval,
-		prometheusAddr: prometheusAddr,
+		
 		queue:          NewPodEventQueue(),
 		filter:         NewFilter(nil),
 		releases:       NewReleaseRegistry(),
@@ -63,7 +61,7 @@ func (w *GlobalPodWatcher) Start(ctx context.Context) error {
 
 	log.Info("Starting GlobalPodWatcher",
 		"resyncInterval", w.resyncInterval,
-		"prometheusAddr", w.prometheusAddr)
+)
 
 	factory := informers.NewSharedInformerFactoryWithOptions(
 		w.k8sClient,
@@ -95,12 +93,6 @@ func (w *GlobalPodWatcher) Start(ctx context.Context) error {
 	log.Info("Pod informer cache synced successfully")
 
 	go w.workerPool.Start(w.ctx)
-
-	go func() {
-		if err := StartPrometheusServer(w.ctx, w.prometheusAddr, w.collector); err != nil {
-			log.ErrorE(err, "Prometheus metrics server error")
-		}
-	}()
 
 	w.started = true
 	log.Info("GlobalPodWatcher started successfully")
@@ -226,4 +218,8 @@ func (w *GlobalPodWatcher) GetQueueSize() int {
 
 func (w *GlobalPodWatcher) UpdateReleaseRevision(releaseName string, revision int) {
 	w.releases.UpdateRevision(releaseName, revision)
+}
+
+func (w *GlobalPodWatcher) GetCollector() *PodCollector {
+	return w.collector
 }

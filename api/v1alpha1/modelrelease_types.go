@@ -44,8 +44,6 @@ type PodMonitorSpec struct {
 	Method   string            `json:"method,omitempty"`
 	Headers  map[string]string `json:"headers,omitempty"`
 
-	PrometheusAddr string `json:"prometheusAddr,omitempty"`
-
 	// Event filter configuration
 	Filter *EventFilterSpec `json:"filter,omitempty"`
 }
@@ -274,10 +272,6 @@ func (in *ModelRelease) GetPodMonitorHeaders() map[string]string {
 		return map[string]string{}
 	}
 	return in.Spec.PodMonitor.Headers
-}
-
-func (in *ModelRelease) GetPrometheusAddr() string {
-	return in.Spec.PodMonitor.PrometheusAddr
 }
 
 func (in *ModelRelease) ShouldRollback() bool {

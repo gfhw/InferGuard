@@ -13,6 +13,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	helmv1alpha1 "github.com/gfhw/inferguard/api/v1alpha1"
 	"github.com/gfhw/inferguard/internal/controller"
@@ -64,11 +65,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	watcher := podwatch.NewGlobalPodWatcher(k8sClient, 5*time.Minute, ":9090")
+	watcher := podwatch.NewGlobalPodWatcher(k8sClient, 5*time.Minute)
 	if err := watcher.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "unable to start global pod watcher")
 		os.Exit(1)
 	}
+	// Register InferGuard AI metrics with the manager built-in /metrics endpoint.
+	metrics.Registry.MustRegister(watcher.GetCollector())
 
 	policyEngine := policy.NewEngine(
 		func(ctx context.Context, releaseName, message string) error {

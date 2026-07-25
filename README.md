@@ -202,7 +202,7 @@ kubectl get modelrelease -n production
 kubectl describe modelrelease llama-3-8b -n production
 
 # 5. 查看 Prometheus 指标
-curl http://localhost:9090/metrics | grep inferguard_
+curl http://localhost:8080/metrics | grep inferguard_
 ```
 
 ---
