@@ -4,6 +4,10 @@ metadata:
   labels:
     control-plane: controller-manager
     app.kubernetes.io/name: inferguard
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
   name: controller-manager-metrics-service
   namespace: system
 spec:
