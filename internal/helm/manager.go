@@ -45,7 +45,7 @@ func (m *Manager) newActionConfig(namespace string) (*action.Configuration, erro
 	return cfg, nil
 }
 
-func (m *Manager) InstallOrUpgrade(ctx context.Context, releaseName, namespace, repoURL, chartName, chartVersion string, values map[string]interface{}, waitTimeout time.Duration, force bool) (*release.Release, error) {
+func (m *Manager) InstallOrUpgrade(ctx context.Context, releaseName, namespace, repoURL, chartName, chartVersion string, values map[string]interface{}, waitTimeout time.Duration, force bool, atomic bool) (*release.Release, error) {
 	cfg, err := m.newActionConfig(namespace)
 	if err != nil {
 		return nil, err
@@ -68,12 +68,12 @@ func (m *Manager) InstallOrUpgrade(ctx context.Context, releaseName, namespace, 
 	}
 
 	if existing != nil {
-		return m.upgrade(cfg, releaseName, chart, values, waitTimeout, force)
+		return m.upgrade(cfg, releaseName, chart, values, waitTimeout, force, atomic)
 	}
 	return m.install(cfg, releaseName, namespace, chart, values, waitTimeout)
 }
 
-func (m *Manager) InstallFromLocal(ctx context.Context, releaseName, namespace, localPath string, values map[string]interface{}, waitTimeout time.Duration, force bool) (*release.Release, error) {
+func (m *Manager) InstallFromLocal(ctx context.Context, releaseName, namespace, localPath string, values map[string]interface{}, waitTimeout time.Duration, force bool, atomic bool) (*release.Release, error) {
 	cfg, err := m.newActionConfig(namespace)
 	if err != nil {
 		return nil, err
@@ -90,7 +90,7 @@ func (m *Manager) InstallFromLocal(ctx context.Context, releaseName, namespace, 
 	}
 
 	if existing != nil {
-		return m.upgrade(cfg, releaseName, chart, values, waitTimeout, force)
+		return m.upgrade(cfg, releaseName, chart, values, waitTimeout, force, atomic)
 	}
 	return m.install(cfg, releaseName, namespace, chart, values, waitTimeout)
 }
@@ -106,11 +106,12 @@ func (m *Manager) install(cfg *action.Configuration, releaseName, namespace stri
 	return client.Run(ch, values)
 }
 
-func (m *Manager) upgrade(cfg *action.Configuration, releaseName string, ch *chart.Chart, values map[string]interface{}, waitTimeout time.Duration, force bool) (*release.Release, error) {
+func (m *Manager) upgrade(cfg *action.Configuration, releaseName string, ch *chart.Chart, values map[string]interface{}, waitTimeout time.Duration, force bool, atomic bool) (*release.Release, error) {
 	client := action.NewUpgrade(cfg)
 	client.Wait = true
 	client.Timeout = waitTimeout
 	client.Force = force
+	client.Atomic = atomic
 
 	return client.Run(releaseName, ch, values)
 }
@@ -278,3 +279,4 @@ func (m *Manager) downloadChart(repoURL, chartName, chartVersion string) (string
 
 	return "", fmt.Errorf("chart directory not found")
 }
+

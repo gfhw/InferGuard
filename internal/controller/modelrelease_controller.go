@@ -170,19 +170,12 @@ func (r *ModelReleaseReconciler) performInstallOrUpgrade(ctx context.Context, hr
 
 	var rel *helmrelease.Release
 	if hr.Spec.Chart.LocalPath != "" {
-		rel, err = r.HelmManager.InstallFromLocal(ctx, releaseName, releaseNs, hr.Spec.Chart.LocalPath, values, hr.GetWaitTimeout(), hr.ShouldForceUpgrade())
+		rel, err = r.HelmManager.InstallFromLocal(ctx, releaseName, releaseNs, hr.Spec.Chart.LocalPath, values, hr.GetWaitTimeout(), hr.ShouldForceUpgrade(), hr.ShouldAtomic())
 	} else {
-		rel, err = r.HelmManager.InstallOrUpgrade(ctx, releaseName, releaseNs, hr.Spec.Chart.Repository, hr.Spec.Chart.Name, hr.Spec.Chart.Version, values, hr.GetWaitTimeout(), hr.ShouldForceUpgrade())
+		rel, err = r.HelmManager.InstallOrUpgrade(ctx, releaseName, releaseNs, hr.Spec.Chart.Repository, hr.Spec.Chart.Name, hr.Spec.Chart.Version, values, hr.GetWaitTimeout(), hr.ShouldForceUpgrade(), hr.ShouldAtomic())
 	}
 	if err != nil {
-		if hr.ShouldAtomic() && existing != nil {
-			inferguardlog.Info("Atomic upgrade failed, rolling back",
-				"release", releaseName, "namespace", releaseNs, "error", err.Error())
-			if rollbackErr := r.HelmManager.Rollback(releaseName, releaseNs, 0, hr.GetWaitTimeout()); rollbackErr != nil {
-				inferguardlog.ErrorE(rollbackErr, "Failed to rollback after atomic upgrade failure",
-					"release", releaseName, "namespace", releaseNs)
-			}
-		}
+
 		if !isRetryable(err) {
 			inferguardlog.Info("Permanent failure detected, giving up",
 				"release", releaseName, "error", err.Error())
