@@ -108,7 +108,7 @@ func NewPodCollector(podInformer cache.SharedIndexInformer, filter *Filter, rele
 	}
 }
 
-// SetPolicyEngine injects the policy engine for AI-metrics-based auto-remediation.
+// SetPolicyEngine injects the policy engine for AI-metrics-based alerting rules.
 func (c *PodCollector) SetPolicyEngine(engine *policy.Engine) {
 	c.policyEngine = engine
 }
