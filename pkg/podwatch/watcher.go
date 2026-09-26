@@ -80,8 +80,9 @@ func (w *GlobalPodWatcher) Start(ctx context.Context) error {
 	})
 
 	w.collector = NewPodCollector(w.podInformer, w.filter, w.releases)
+	w.collector.SetPolicyEngine(w.policyEngine)
 
-	w.workerPool = NewWorkerPool(w.queue, w.k8sClient, w.collector, w.releases, w.policyEngine)
+	w.workerPool = NewWorkerPool(w.queue, w.k8sClient, w.collector, w.releases)
 
 	factory.Start(w.ctx.Done())
 

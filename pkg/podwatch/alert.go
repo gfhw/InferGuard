@@ -13,7 +13,8 @@ import (
 //   $${release_name}  $${pod_name}  $${namespace}  $${pod_phase}
 //   $${pod_restart}   $${pod_ip}
 //
-// AI inference variables (only substituted when state != nil):
+// AI inference variables (substituted to "0" when state is nil so the
+// placeholder never leaks into a pod-level alert body):
 //   $${inference_latency_ms}  $${gpu_cache_pct}
 func expandAlertVars(alertBody string, info PodInfo, releaseName string, state *policy.InferenceState) string {
 	s := alertBody
@@ -24,14 +25,16 @@ func expandAlertVars(alertBody string, info PodInfo, releaseName string, state *
 	s = strings.ReplaceAll(s, "${pod_ip}", info.PodIP)
 	s = strings.ReplaceAll(s, "${pod_restart}", strconv.Itoa(int(info.Restart)))
 
+	if state != nil && state.LatencyCount > 0 {
+		avgMs := (state.LatencySumSec / state.LatencyCount) * 1000
+		s = strings.ReplaceAll(s, "${inference_latency_ms}", strconv.FormatFloat(avgMs, 'f', 1, 64))
+	} else {
+		s = strings.ReplaceAll(s, "${inference_latency_ms}", "0")
+	}
 	if state != nil {
-		if state.LatencyCount > 0 {
-			avgMs := (state.LatencySumSec / state.LatencyCount) * 1000
-			s = strings.ReplaceAll(s, "${inference_latency_ms}", strconv.FormatFloat(avgMs, 'f', 1, 64))
-		} else {
-			s = strings.ReplaceAll(s, "${inference_latency_ms}", "0")
-		}
 		s = strings.ReplaceAll(s, "${gpu_cache_pct}", strconv.FormatFloat(state.GPUCachePct, 'f', 1, 64))
+	} else {
+		s = strings.ReplaceAll(s, "${gpu_cache_pct}", "0")
 	}
 
 	return s

@@ -1,4 +1,4 @@
-﻿package podwatch
+package podwatch
 
 import (
 	"context"
@@ -93,8 +93,6 @@ type PodCollector struct {
 	releases     *ReleaseRegistry
 	httpClient   *http.Client
 	policyEngine *policy.Engine
-
-	eventsProcessed int64
 }
 
 func NewPodCollector(podInformer cache.SharedIndexInformer, filter *Filter, releases *ReleaseRegistry) *PodCollector {
@@ -159,18 +157,17 @@ func (c *PodCollector) Collect(ch chan<- prometheus.Metric) {
 
 		// Scrape vLLM / TGI / SGLang /metrics endpoint live.
 		inferenceState := c.scrapeAndEmit(ch, info, releaseName, releaseCfg.Revision)
-		c.eventsProcessed++
 
 		// Evaluate AI-metrics-based policies (e.g. InferenceLatency > threshold -> notify)
 		if c.policyEngine != nil && inferenceState != nil {
-				results := c.policyEngine.EvaluateInference(context.TODO(),
-					releaseName, info.Namespace, *inferenceState, releaseCfg.Policies)
+			results := c.policyEngine.EvaluateInference(context.Background(),
+				releaseName, info.Namespace, *inferenceState, releaseCfg.Policies)
 
-				for _, r := range results {
-					if releaseCfg.EventSender != nil {
-						body := expandAlertVars(r.AlertBody, info, releaseName, inferenceState)
-						_ = releaseCfg.EventSender.SendRaw(context.TODO(), body)
-					}
+			for _, r := range results {
+				if releaseCfg.EventSender != nil {
+					body := expandAlertVars(r.AlertBody, info, releaseName, inferenceState)
+					_ = releaseCfg.EventSender.SendRaw(context.Background(), body)
+				}
 			}
 		}
 	}
@@ -198,6 +195,11 @@ func (c *PodCollector) scrapeAndEmit(ch chan<- prometheus.Metric, info PodInfo, 
 	}
 
 	engine := detectEngine(string(body))
+	if engine == "" {
+		// Not a recognized inference engine (vLLM / TGI / SGLang); don't emit
+		// mislabeled metrics or alert on unrelated /metrics output.
+		return nil
+	}
 	lines := strings.Split(string(body), "\n")
     
     state := &policy.InferenceState{
@@ -372,5 +374,8 @@ func detectEngine(metricsBody string) string {
 	if strings.Contains(metricsBody, "sglang:") {
 		return "sglang"
 	}
-	return "vllm"
+	if strings.Contains(metricsBody, "vllm:") {
+		return "vllm"
+	}
+	return ""
 }

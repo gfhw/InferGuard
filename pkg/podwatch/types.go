@@ -1,4 +1,4 @@
-﻿package podwatch
+package podwatch
 
 import (
 	"context"
@@ -26,141 +26,96 @@ type PodInfo struct {
 	PodIP     string
 	Ready     bool
 	Restart   int32
+
+	// AI-ops diagnostics surfaced to the CR status so `kubectl describe` can
+	// answer "why is this pod unhealthy" without inspecting the pod directly.
+	OOMKilled            bool
+	LastTerminationReason string
+	Reason               string
+	Message              string
 }
 
 func ConvertToPodInfo(pod *corev1.Pod) PodInfo {
+	// Ready reflects the authoritative PodReady condition (all containers ready),
+	// not "any container ready". A partially-ready pod must count as unhealthy.
 	ready := false
-	restart := int32(0)
-	for _, cs := range pod.Status.ContainerStatuses {
-		restart += cs.RestartCount
-		for _, c := range pod.Spec.Containers {
-			if c.Name == cs.Name {
-				if cs.Ready {
-					ready = true
-				}
-			}
+	for _, c := range pod.Status.Conditions {
+		if c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue {
+			ready = true
+			break
 		}
 	}
-	if len(pod.Status.ContainerStatuses) == 0 {
-		for _, c := range pod.Status.Conditions {
-			if c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue {
-				ready = true
+
+	// Sum restart counts across regular AND init containers, and collect the
+	// most recent termination reason (OOM is the high-signal case for GPU pods).
+	restart := int32(0)
+	oomKilled := false
+	lastTerminationReason := ""
+	for _, cs := range pod.Status.ContainerStatuses {
+		restart += cs.RestartCount
+		if cs.LastTerminationState.Terminated != nil {
+			if cs.LastTerminationState.Terminated.Reason == "OOMKilled" {
+				oomKilled = true
+			}
+			lastTerminationReason = cs.LastTerminationState.Terminated.Reason
+		}
+	}
+	for _, is := range pod.Status.InitContainerStatuses {
+		restart += is.RestartCount
+		if is.LastTerminationState.Terminated != nil {
+			if is.LastTerminationState.Terminated.Reason == "OOMKilled" {
+				oomKilled = true
+			}
+			if lastTerminationReason == "" {
+				lastTerminationReason = is.LastTerminationState.Terminated.Reason
 			}
 		}
 	}
 
 	return PodInfo{
-		Namespace: pod.Namespace,
-		Name:      pod.Name,
-		UID:       string(pod.UID),
-		Phase:     string(pod.Status.Phase),
-		NodeName:  pod.Spec.NodeName,
-		PodIP:     pod.Status.PodIP,
-		Ready:     ready,
-		Restart:   restart,
+		Namespace:             pod.Namespace,
+		Name:                  pod.Name,
+		UID:                   string(pod.UID),
+		Phase:                 string(pod.Status.Phase),
+		NodeName:              pod.Spec.NodeName,
+		PodIP:                 pod.Status.PodIP,
+		Ready:                 ready,
+		Restart:               restart,
+		OOMKilled:             oomKilled,
+		LastTerminationReason: lastTerminationReason,
+		Reason:                pod.Status.Reason,
+		Message:               pod.Status.Message,
 	}
 }
 
 type PendingPod struct {
-	PodInfo
-	Snapshot    PodInfo
-	EventType   PodEventType
+	Namespace   string
+	Name        string
+	UID         string
 	ReleaseName string
-}
-
-type PodEvent struct {
-	Type        PodEventType `json:"type"`
-	Pod         PodInfo      `json:"pod,omitempty"`
-	OldPod      PodInfo      `json:"oldPod,omitempty"`
-	Namespace   string       `json:"namespace,omitempty"`
-	ReleaseName string       `json:"releaseName,omitempty"`
-	Timestamp   int64        `json:"timestamp"`
-}
-
-type PodStatus struct {
-	Namespace     string       `json:"namespace,omitempty"`
-	Name          string       `json:"name,omitempty"`
-	UID           string       `json:"uid,omitempty"`
-	Phase         string       `json:"phase,omitempty"`
-	NodeName      string       `json:"nodeName,omitempty"`
-	PodIP         string       `json:"podIP,omitempty"`
-	Ready         bool         `json:"ready"`
-	Restart       int32        `json:"restart"`
-	LastEventType PodEventType `json:"lastEventType,omitempty"`
-}
-
-func PodInfoToPodStatus(info PodInfo) PodStatus {
-	return PodStatus{
-		Namespace: info.Namespace,
-		Name:      info.Name,
-		UID:       info.UID,
-		Phase:     info.Phase,
-		NodeName:  info.NodeName,
-		PodIP:     info.PodIP,
-		Ready:     info.Ready,
-		Restart:   info.Restart,
-	}
+	EventType   PodEventType
+	// Snapshot is the pod state captured at enqueue time. It is only needed for
+	// DELETED events, where the pod is already gone and cannot be re-fetched.
+	Snapshot PodInfo
 }
 
 type StatusUpdater interface {
 	UpdatePodStatus(ctx context.Context, releaseName string, pod PodInfo, eventType PodEventType) error
 }
 
-// ReleaseConfig holds per-release sender and status updater configuration..
+// ReleaseConfig holds per-release sender and status updater configuration.
 type ReleaseConfig struct {
 	EventSender   *EventSender
 	StatusUpdater StatusUpdater
-	Filter        *ReleaseFilter
 	Policies      []helmv1alpha1.PolicySpec
 	Revision      int
 }
 
 // ReleaseRegistry maps releaseName -> ReleaseConfig.
-// ReleaseFilter mirrors EventFilterSpec at runtime for per-release event filtering.
-type ReleaseFilter struct {
-	OnUnhealthyOnly  bool
-	MinRestartCount  int32
-	IgnoreEventTypes []string
-	Phases           []string
-}
-
-// ShouldPush returns true if the event passes this release filter.
-func (f *ReleaseFilter) ShouldPush(info PodInfo, eventType PodEventType) bool {
-	if f == nil {
-		return true
-	}
-	if f.OnUnhealthyOnly && info.Ready {
-		return false
-	}
-	if f.MinRestartCount > 0 && info.Restart < f.MinRestartCount {
-		return false
-	}
-	for _, t := range f.IgnoreEventTypes {
-		if string(eventType) == t {
-			return false
-		}
-	}
-	if len(f.Phases) > 0 {
-		found := false
-		for _, p := range f.Phases {
-			if info.Phase == p {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	return true
-}
-
 type ReleaseRegistry struct {
 	mu      sync.Mutex
 	entries map[string]*ReleaseConfig
 }
-
-// ReleaseFilter mirrors EventFilterSpec at runtime for per-release event filtering.
 
 func NewReleaseRegistry() *ReleaseRegistry {
 	return &ReleaseRegistry{
@@ -204,7 +159,15 @@ func (r *ReleaseRegistry) Get(releaseName string) *ReleaseConfig {
 func (r *ReleaseRegistry) UpdateRevision(releaseName string, revision int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if cfg, ok := r.entries[releaseName]; ok {
-		cfg.Revision = revision
+	cfg, ok := r.entries[releaseName]
+	if !ok {
+		return
 	}
+	// Replace the entry with a shallow copy so readers that already hold the
+	// previous pointer never observe a mutated Revision. The collector reads
+	// ReleaseConfig.Revision outside the registry lock, so mutating it in place
+	// would be a data race.
+	clone := *cfg
+	clone.Revision = revision
+	r.entries[releaseName] = &clone
 }

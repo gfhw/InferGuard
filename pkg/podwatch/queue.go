@@ -6,17 +6,19 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+// PodEventQueue is a UID-deduplicating queue. A single map keyed by pod UID
+// holds at most one pending entry per pod, which keeps a CrashLoopBackOff pod
+// from flooding the queue with update events. The single worker then fetches
+// the pod's live state from the API server when it processes the entry.
 type PodEventQueue struct {
 	mu     sync.Mutex
-	items  []*PendingPod
-	index  map[string]*PendingPod
+	items  map[string]*PendingPod
 	notify chan struct{}
 }
 
 func NewPodEventQueue() *PodEventQueue {
 	return &PodEventQueue{
-		items:  make([]*PendingPod, 0),
-		index:  make(map[string]*PendingPod),
+		items:  make(map[string]*PendingPod),
 		notify: make(chan struct{}, 1),
 	}
 }
@@ -30,18 +32,31 @@ func (q *PodEventQueue) Put(pod *corev1.Pod, eventType PodEventType) {
 		return
 	}
 
-	if _, ok := q.index[key]; ok {
+	if existing, ok := q.items[key]; ok {
+		// Merge instead of dropping: collapse the event type to the most severe
+		// one seen so far. This keeps the dedup (one slot per pod) while keeping
+		// the emitted event type accurate — e.g. ADDED then MODIFIED becomes
+		// MODIFIED, and anything then DELETED becomes DELETED (terminal).
+		switch eventType {
+		case PodEventDeleted:
+			existing.EventType = PodEventDeleted
+			existing.Snapshot = ConvertToPodInfo(pod)
+		case PodEventModified:
+			if existing.EventType == PodEventAdded {
+				existing.EventType = PodEventModified
+			}
+		}
 		return
 	}
 
-	pending := &PendingPod{
-		PodInfo:     ConvertToPodInfo(pod),
-		Snapshot:    ConvertToPodInfo(pod),
-		EventType:   eventType,
+	q.items[key] = &PendingPod{
+		Namespace:   pod.Namespace,
+		Name:        pod.Name,
+		UID:         key,
 		ReleaseName: GetReleaseName(pod),
+		EventType:   eventType,
+		Snapshot:    ConvertToPodInfo(pod),
 	}
-	q.items = append(q.items, pending)
-	q.index[key] = pending
 
 	select {
 	case q.notify <- struct{}{}:
@@ -61,9 +76,11 @@ func (q *PodEventQueue) DrainAll() []*PendingPod {
 		return nil
 	}
 
-	batch := q.items
-	q.items = make([]*PendingPod, 0)
-	q.index = make(map[string]*PendingPod)
+	batch := make([]*PendingPod, 0, len(q.items))
+	for _, p := range q.items {
+		batch = append(batch, p)
+	}
+	q.items = make(map[string]*PendingPod)
 
 	return batch
 }
@@ -77,6 +94,5 @@ func (q *PodEventQueue) Size() int {
 func (q *PodEventQueue) Clear() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	q.items = make([]*PendingPod, 0)
-	q.index = make(map[string]*PendingPod)
+	q.items = make(map[string]*PendingPod)
 }

@@ -1,4 +1,4 @@
-﻿package podwatch
+package podwatch
 
 import (
 	"context"
@@ -9,15 +9,13 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/gfhw/inferguard/pkg/log"
-	"github.com/gfhw/inferguard/pkg/policy"
 )
 
 type WorkerPool struct {
-	queue        *PodEventQueue
-	k8sClient    kubernetes.Interface
-	collector    *PodCollector
-	releases     *ReleaseRegistry
-	policyEngine *policy.Engine
+	queue     *PodEventQueue
+	k8sClient kubernetes.Interface
+	collector *PodCollector
+	releases  *ReleaseRegistry
 }
 
 func NewWorkerPool(
@@ -25,14 +23,12 @@ func NewWorkerPool(
 	k8sClient kubernetes.Interface,
 	collector *PodCollector,
 	releases *ReleaseRegistry,
-	policyEngine *policy.Engine,
 ) *WorkerPool {
 	return &WorkerPool{
-		queue:        queue,
-		k8sClient:    k8sClient,
-		collector:    collector,
-		releases:     releases,
-		policyEngine: policyEngine,
+		queue:     queue,
+		k8sClient: k8sClient,
+		collector: collector,
+		releases:  releases,
 	}
 }
 
@@ -65,6 +61,10 @@ func (w *WorkerPool) drainAll(ctx context.Context) {
 	}
 }
 
+// processOnePod resolves a queued pod event to the pod's live state and writes
+// it back to the owning ModelRelease's status.podStatuses. This is the operator's
+// "senses": it keeps the CR's self-description current without pushing a
+// duplicated event stream to an external webhook.
 func (w *WorkerPool) processOnePod(ctx context.Context, pod *PendingPod) {
 	releaseCfg := w.releases.Get(pod.ReleaseName)
 	if releaseCfg == nil {
@@ -73,42 +73,22 @@ func (w *WorkerPool) processOnePod(ctx context.Context, pod *PendingPod) {
 		return
 	}
 
-	// Informer already told us it's deleted 锟?trust it, no API call needed.
+	// Informer already told us it's deleted; trust it and remove the pod from
+	// the CR using the snapshot captured at enqueue time.
 	if pod.EventType == PodEventDeleted {
-		// Apply per-release event filter.
-		if releaseCfg.Filter != nil && !releaseCfg.Filter.ShouldPush(pod.PodInfo, PodEventDeleted) {
-			return
-		}
-
-		event := &PodEvent{
-			Type:        PodEventDeleted,
-			OldPod:      pod.Snapshot,
-			Namespace:   pod.Namespace,
-			ReleaseName: pod.ReleaseName,
-			Timestamp:   time.Now().Unix(),
-		}
-		w.pushAndUpdateMetrics(ctx, releaseCfg, event)
 		w.updateCRStatus(ctx, releaseCfg, pod.ReleaseName, pod.Snapshot, PodEventDeleted)
 		return
 	}
 
-	// Fetch real-time state from API server.
+	// Fetch the pod's live state from the API server (not the informer cache) so
+	// the CR never reflects a stale snapshot.
 	livePod, err := w.k8sClient.CoreV1().Pods(pod.Namespace).
 		Get(ctx, pod.Name, metav1.GetOptions{})
-
 	if err != nil {
 		if errors.IsNotFound(err) {
-			event := &PodEvent{
-				Type:        PodEventDeleted,
-				OldPod:      pod.Snapshot,
-				Namespace:   pod.Namespace,
-				ReleaseName: pod.ReleaseName,
-				Timestamp:   time.Now().Unix(),
-			}
-			log.Info("Pod not found, pushing DELETED",
+			log.Info("Pod not found, treating as DELETED",
 				"uid", pod.UID, "name", pod.Name,
 				"originalEvent", pod.EventType)
-			w.pushAndUpdateMetrics(ctx, releaseCfg, event)
 			w.updateCRStatus(ctx, releaseCfg, pod.ReleaseName, pod.Snapshot, PodEventDeleted)
 			return
 		}
@@ -117,72 +97,7 @@ func (w *WorkerPool) processOnePod(ctx context.Context, pod *PendingPod) {
 		return
 	}
 
-	// Pod exists 锟?push event with API's current state.
-	liveInfo := ConvertToPodInfo(livePod)
-
-	// Apply per-release event filter.
-	if releaseCfg.Filter != nil && !releaseCfg.Filter.ShouldPush(liveInfo, pod.EventType) {
-		return
-	}
-
-	event := &PodEvent{
-		Type:        pod.EventType,
-		Pod:         liveInfo,
-		Namespace:   pod.Namespace,
-		ReleaseName: pod.ReleaseName,
-		Timestamp:   time.Now().Unix(),
-	}
-
-	log.Info("Building pod event",
-		"type", event.Type,
-		"uid", pod.UID,
-		"name", pod.Name,
-		"phase", liveInfo.Phase)
-
-	w.pushAndUpdateMetrics(ctx, releaseCfg, event)
-	w.updateCRStatus(ctx, releaseCfg, pod.ReleaseName, liveInfo, event.Type)
-
-	// Policy engine: evaluate alerting rules.
-	if w.policyEngine != nil {
-		results := w.policyEngine.Evaluate(ctx, pod.ReleaseName, pod.Namespace,
-			policy.PodState{
-				Namespace: liveInfo.Namespace,
-				Name:      liveInfo.Name,
-				Phase:     liveInfo.Phase,
-				Ready:     liveInfo.Ready,
-				Restart:   liveInfo.Restart,
-			}, releaseCfg.Policies)
-
-		// Push Notify results via EventSender (raw user-defined JSON).
-		for _, r := range results {
-			if releaseCfg.EventSender != nil {
-				body := expandAlertVars(r.AlertBody, liveInfo, pod.ReleaseName, nil)
-				if err := releaseCfg.EventSender.SendRaw(ctx, body); err != nil {
-					log.ErrorE(err, "Failed to push policy alert",
-						"policy", r.PolicyName, "release", pod.ReleaseName)
-				}
-			}
-		}
-	}
-}
-
-func (w *WorkerPool) pushAndUpdateMetrics(ctx context.Context, releaseCfg *ReleaseConfig, event *PodEvent) {
-	pushCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	if releaseCfg.EventSender != nil {
-		if err := releaseCfg.EventSender.Send(pushCtx, *event); err != nil {
-			podName := event.Pod.Name
-			if podName == "" {
-				podName = event.OldPod.Name
-			}
-			log.ErrorE(err, "Failed to push pod event, will retry on next resync",
-				"eventType", event.Type,
-				"release", event.ReleaseName,
-				"pod", podName)
-		}
-	}
-
+	w.updateCRStatus(ctx, releaseCfg, pod.ReleaseName, ConvertToPodInfo(livePod), pod.EventType)
 }
 
 func (w *WorkerPool) updateCRStatus(ctx context.Context, releaseCfg *ReleaseConfig, releaseName string, info PodInfo, eventType PodEventType) {
@@ -199,4 +114,3 @@ func (w *WorkerPool) updateCRStatus(ctx context.Context, releaseCfg *ReleaseConf
 			"namespace", info.Namespace)
 	}
 }
-

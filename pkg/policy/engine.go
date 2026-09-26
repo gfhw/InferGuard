@@ -8,15 +8,6 @@ import (
 	helmv1alpha1 "github.com/gfhw/inferguard/api/v1alpha1"
 )
 
-// PodState holds the snapshot needed for pod-level policy evaluation.
-type PodState struct {
-	Namespace string
-	Name      string
-	Phase     string
-	Ready     bool
-	Restart   int32
-}
-
 // InferenceState holds AI-specific metrics for policy evaluation.
 type InferenceState struct {
 	Namespace       string
@@ -27,12 +18,9 @@ type InferenceState struct {
 	RequestsWaiting int32
 }
 
-// NotifyFunc is called when a policy triggers an alert notification.
-type NotifyFunc func(ctx context.Context, releaseName, message string) error
-
-// Engine evaluates policies and executes alert notifications.
+// Engine evaluates AI-metrics-based policies and returns the alerts that fired.
+// The caller is responsible for delivering them (via EventSender.SendRaw).
 type Engine struct {
-	notify         NotifyFunc
 	conditionCount map[string]int32
 	mu             sync.Mutex
 }
@@ -45,37 +33,32 @@ type PolicyResult struct {
 	AlertBody  string
 }
 
-func NewEngine(notifyFn NotifyFunc) *Engine {
+func NewEngine() *Engine {
 	return &Engine{
-		notify:         notifyFn,
 		conditionCount: make(map[string]int32),
 	}
-}
-
-// Evaluate checks pod-level policies (PodRestart, PodNotReady, PodCrash).
-func (e *Engine) Evaluate(ctx context.Context, releaseName, namespace string,
-	pod PodState, policies []helmv1alpha1.PolicySpec) []PolicyResult {
-	return e.evaluate(ctx, releaseName, namespace, policies, func(p helmv1alpha1.PolicySpec) bool {
-		return e.matchCondition(p.Condition, pod)
-	})
 }
 
 // EvaluateInference checks AI-metrics-based policies (InferenceLatency, GPUCacheUsage, etc.).
 func (e *Engine) EvaluateInference(ctx context.Context, releaseName, namespace string,
 	infer InferenceState, policies []helmv1alpha1.PolicySpec) []PolicyResult {
-	return e.evaluate(ctx, releaseName, namespace, policies, func(p helmv1alpha1.PolicySpec) bool {
+	return e.evaluate(ctx, releaseName, namespace, "inference", infer.Name, policies, func(p helmv1alpha1.PolicySpec) bool {
 		return e.matchInferenceCondition(p.Condition, infer)
 	})
 }
 
 // evaluate is the shared loop: condition counting + alert notification.
-func (e *Engine) evaluate(ctx context.Context, releaseName, namespace string,
+func (e *Engine) evaluate(ctx context.Context, releaseName, namespace, domain, target string,
 	policies []helmv1alpha1.PolicySpec, matchFn func(helmv1alpha1.PolicySpec) bool) []PolicyResult {
 
 	var results []PolicyResult
 
 	for _, p := range policies {
-		key := releaseName + "|" + p.Name
+		// Scope the trigger counter per release + policy + evaluation domain +
+		// target (pod). Without domain and target in the key, pod-level and
+		// inference-level evaluation would zero each other's counters, and all
+		// replicas would share one counter — making triggerCount>1 unreachable.
+		key := releaseName + "|" + domain + "|" + p.Name + "|" + target
 		met := matchFn(p)
 
 		e.mu.Lock()
@@ -118,19 +101,6 @@ func (e *Engine) evaluate(ctx context.Context, releaseName, namespace string,
 	}
 
 	return results
-}
-
-func (e *Engine) matchCondition(cond helmv1alpha1.PolicyCondition, pod PodState) bool {
-	switch cond.Type {
-	case "PodRestart":
-		return pod.Restart >= cond.Threshold
-	case "PodNotReady":
-		return !pod.Ready
-	case "PodCrash":
-		return pod.Phase == "Failed" || pod.Phase == "CrashLoopBackOff"
-	default:
-		return false
-	}
 }
 
 func (e *Engine) matchInferenceCondition(cond helmv1alpha1.PolicyCondition, infer InferenceState) bool {

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"os"
 	"time"
@@ -66,20 +65,19 @@ func main() {
 	}
 
 	watcher := podwatch.NewGlobalPodWatcher(k8sClient, 5*time.Minute)
+
+	policyEngine := policy.NewEngine()
+	// Set the policy engine before Start so the worker pool and collector are
+	// constructed with it — otherwise pod events arriving between Start and the
+	// later SetPolicyEngine call would be silently skipped.
+	watcher.SetPolicyEngine(policyEngine)
+
 	if err := watcher.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "unable to start global pod watcher")
 		os.Exit(1)
 	}
 	// Register InferGuard AI metrics with the manager built-in /metrics endpoint.
 	metrics.Registry.MustRegister(watcher.GetCollector())
-
-	policyEngine := policy.NewEngine(
-		func(ctx context.Context, releaseName, message string) error {
-			setupLog.Info("Policy triggered", "release", releaseName, "message", message)
-			return nil
-		},
-	)
-	watcher.SetPolicyEngine(policyEngine)
 
 	reconciler := controller.NewModelReleaseReconciler(
 		mgr.GetClient(),

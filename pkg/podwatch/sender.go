@@ -1,17 +1,16 @@
 package podwatch
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
-
-	"github.com/gfhw/inferguard/pkg/log"
+	"sync"
+	"time"
 )
 
 type EventSender struct {
+	mu       sync.Mutex
 	endpoint string
 	method   string
 	headers  map[string]string
@@ -25,7 +24,7 @@ func NewEventSender(endpoint string) *EventSender {
 		headers: map[string]string{
 			"Content-Type": "application/json",
 		},
-		client: &http.Client{},
+		client: &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
@@ -46,56 +45,34 @@ func NewEventSenderWithConfig(endpoint string, method string, headers map[string
 		endpoint: endpoint,
 		method:   method,
 		headers:  h,
-		client:   &http.Client{},
+		client:   &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
-func (s *EventSender) Send(ctx context.Context, event PodEvent) error {
-	if s.endpoint == "" {
-		return nil
-	}
-
-	body, err := json.Marshal(event)
-	if err != nil {
-		return fmt.Errorf("failed to marshal event: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, s.method, s.endpoint, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
+// config returns a consistent snapshot of the sender configuration under lock,
+// so concurrent Send/SendRaw calls never observe a partially-updated endpoint,
+// method, or header map.
+func (s *EventSender) config() (endpoint, method string, headers map[string]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	h := make(map[string]string, len(s.headers))
 	for k, v := range s.headers {
-		req.Header.Set(k, v)
+		h[k] = v
 	}
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		log.Warn("Event push returned non-2xx status",
-			"status", resp.StatusCode,
-			"endpoint", s.endpoint,
-			"method", s.method)
-		return fmt.Errorf("event push failed with status %d", resp.StatusCode)
-	}
-
-	return nil
+	return s.endpoint, s.method, h
 }
 
 // SendRaw posts a raw JSON string directly — used for user-defined alert bodies.
 func (s *EventSender) SendRaw(ctx context.Context, rawJSON string) error {
-	if s.endpoint == "" || rawJSON == "" {
+	endpoint, method, headers := s.config()
+	if endpoint == "" || rawJSON == "" {
 		return nil
 	}
-	req, err := http.NewRequestWithContext(ctx, s.method, s.endpoint, strings.NewReader(rawJSON))
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, strings.NewReader(rawJSON))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
-	for k, v := range s.headers {
+	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
 	resp, err := s.client.Do(req)
@@ -110,6 +87,8 @@ func (s *EventSender) SendRaw(ctx context.Context, rawJSON string) error {
 }
 
 func (s *EventSender) UpdateConfig(endpoint string, method string, headers map[string]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if endpoint != "" {
 		s.endpoint = endpoint
 	}
