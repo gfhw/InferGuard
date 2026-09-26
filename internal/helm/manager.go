@@ -1,9 +1,12 @@
-﻿package helm
+package helm
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -21,6 +24,12 @@ import (
 type Manager struct {
 	settings *cli.EnvSettings
 }
+
+// ErrReleaseNotFound is returned when a Helm release does not exist. The Helm
+// driver surfaces this as a plain "release: not found" error, which does NOT
+// satisfy k8s.io/apimachinery's errors.IsNotFound (that only matches Kubernetes
+// StatusError). Callers must match against this sentinel instead.
+var ErrReleaseNotFound = errors.New("release: not found")
 
 func NewManager() *Manager {
 	return &Manager{
@@ -52,7 +61,7 @@ func (m *Manager) InstallOrUpgrade(ctx context.Context, releaseName, namespace, 
 	}
 
 	existing, err := m.GetRelease(releaseName, namespace)
-	if err != nil && !strings.Contains(err.Error(), "not found") {
+	if err != nil && !errors.Is(err, ErrReleaseNotFound) {
 		return nil, fmt.Errorf("failed to check existing release: %w", err)
 	}
 
@@ -60,7 +69,7 @@ func (m *Manager) InstallOrUpgrade(ctx context.Context, releaseName, namespace, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to download chart: %w", err)
 	}
-	defer os.Remove(chartPath)
+	defer os.RemoveAll(filepath.Dir(chartPath))
 
 	chart, err := loader.Load(chartPath)
 	if err != nil {
@@ -80,7 +89,7 @@ func (m *Manager) InstallFromLocal(ctx context.Context, releaseName, namespace, 
 	}
 
 	existing, err := m.GetRelease(releaseName, namespace)
-	if err != nil && !strings.Contains(err.Error(), "not found") {
+	if err != nil && !errors.Is(err, ErrReleaseNotFound) {
 		return nil, fmt.Errorf("failed to check existing release: %w", err)
 	}
 
@@ -134,20 +143,11 @@ func (m *Manager) GetRelease(releaseName, namespace string) (*release.Release, e
 	}
 
 	client := action.NewGet(cfg)
-	return client.Run(releaseName)
-}
-
-func (m *Manager) ListReleases(namespace string) ([]*release.Release, error) {
-	cfg, err := m.newActionConfig(namespace)
-	if err != nil {
-		return nil, err
+	rel, err := client.Run(releaseName)
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "not found") {
+		return nil, ErrReleaseNotFound
 	}
-
-	client := action.NewList(cfg)
-	client.All = true
-	client.AllNamespaces = false
-
-	return client.Run()
+	return rel, err
 }
 
 func (m *Manager) Rollback(releaseName, namespace string, version int, waitTimeout time.Duration) error {
@@ -167,116 +167,88 @@ func (m *Manager) Rollback(releaseName, namespace string, version int, waitTimeo
 	return client.Run(releaseName)
 }
 
-func (m *Manager) GetHistory(releaseName, namespace string) ([]*release.Release, error) {
-	cfg, err := m.newActionConfig(namespace)
-	if err != nil {
-		return nil, err
-	}
-
-	client := action.NewHistory(cfg)
-	return client.Run(releaseName)
-}
-
-func (m *Manager) GetValues(releaseName, namespace string, allValues bool) (map[string]interface{}, error) {
-	cfg, err := m.newActionConfig(namespace)
-	if err != nil {
-		return nil, err
-	}
-
-	client := action.NewGetValues(cfg)
-	client.AllValues = allValues
-
-	return client.Run(releaseName)
-}
-
-func (m *Manager) ReleaseStatus(releaseName, namespace string) (*release.Release, error) {
-	cfg, err := m.newActionConfig(namespace)
-	if err != nil {
-		return nil, err
-	}
-
-	client := action.NewStatus(cfg)
-	return client.Run(releaseName)
-}
-
-func (m *Manager) Template(releaseName, namespace string, chart *chart.Chart, values map[string]interface{}, dryRun bool) (string, error) {
-	cfg, err := m.newActionConfig(namespace)
-	if err != nil {
-		return "", err
-	}
-
-	client := action.NewInstall(cfg)
-	client.DryRun = dryRun
-	client.ReleaseName = releaseName
-	client.Namespace = namespace
-	client.IncludeCRDs = true
-	client.SkipCRDs = false
-
-	rel, err := client.Run(chart, values)
-	if err != nil {
-		return "", err
-	}
-
-	return rel.Manifest, nil
-}
-
 func (m *Manager) downloadChart(repoURL, chartName, chartVersion string) (string, error) {
 	tmpDir, err := os.MkdirTemp("", "helm-chart-")
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp dir: %w", err)
 	}
 
-	repoFile := tmpDir + "/repositories.yaml"
-	repoCache := tmpDir + "/cache"
-
+	repoFile := filepath.Join(tmpDir, "repositories.yaml")
+	repoCache := filepath.Join(tmpDir, "cache")
 	if err := os.MkdirAll(repoCache, 0755); err != nil {
+		os.RemoveAll(tmpDir)
 		return "", err
 	}
 
+	// Write a throwaway repo file so the Helm repo machinery can resolve the
+	// index relative to repoURL.
 	r := repo.NewFile()
-	r.Add(&repo.Entry{
-		Name: "inferguard-repo",
-		URL:  repoURL,
-	})
+	r.Add(&repo.Entry{Name: "inferguard-repo", URL: repoURL})
 	if err := r.WriteFile(repoFile, 0644); err != nil {
+		os.RemoveAll(tmpDir)
 		return "", err
 	}
 
 	chartRepo, err := repo.NewChartRepository(
 		&repo.Entry{Name: "inferguard-repo", URL: repoURL},
-		getter.All(&cli.EnvSettings{}),
+		getter.All(m.settings),
 	)
 	if err != nil {
+		os.RemoveAll(tmpDir)
 		return "", err
 	}
 	chartRepo.CachePath = repoCache
 
-	if _, err := chartRepo.DownloadIndexFile(); err != nil {
+	indexPath, err := chartRepo.DownloadIndexFile()
+	if err != nil {
+		os.RemoveAll(tmpDir)
 		return "", fmt.Errorf("failed to download index: %w", err)
 	}
 
-	pull := action.NewPull()
-	pull.Settings = &cli.EnvSettings{}
-	pull.Version = chartVersion
-	pull.DestDir = tmpDir
-	pull.Untar = true
-
-	_, err = pull.Run(repoURL + "/" + chartName)
+	idx, err := repo.LoadIndexFile(indexPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to pull chart: %w", err)
+		os.RemoveAll(tmpDir)
+		return "", fmt.Errorf("failed to load index: %w", err)
 	}
 
-	entries, err := os.ReadDir(tmpDir)
+	cv, err := idx.Get(chartName, chartVersion)
 	if err != nil {
+		os.RemoveAll(tmpDir)
+		return "", fmt.Errorf("chart %s not found in repository index: %w", chartName, err)
+	}
+	if len(cv.URLs) == 0 {
+		os.RemoveAll(tmpDir)
+		return "", fmt.Errorf("chart %s has no downloadable URL", chartName)
+	}
+
+	// Index URLs are usually relative to the repository root; resolve them.
+	chartURL := cv.URLs[0]
+	if parsed, err := url.Parse(chartURL); err != nil || !parsed.IsAbs() {
+		chartURL = strings.TrimSuffix(repoURL, "/") + "/" + strings.TrimPrefix(chartURL, "/")
+	}
+
+	scheme := "http"
+	if parsed, err := url.Parse(chartURL); err == nil && parsed.Scheme != "" {
+		scheme = parsed.Scheme
+	}
+	g, err := getter.All(m.settings).ByScheme(scheme)
+	if err != nil {
+		os.RemoveAll(tmpDir)
+		return "", fmt.Errorf("no getter for scheme %q: %w", scheme, err)
+	}
+
+	buf, err := g.Get(chartURL)
+	if err != nil {
+		os.RemoveAll(tmpDir)
+		return "", fmt.Errorf("failed to download chart archive: %w", err)
+	}
+
+	dest := filepath.Join(tmpDir, fmt.Sprintf("%s-%s.tgz", chartName, cv.Version))
+	if err := os.WriteFile(dest, buf.Bytes(), 0644); err != nil {
+		os.RemoveAll(tmpDir)
 		return "", err
 	}
 
-	for _, entry := range entries {
-		if entry.IsDir() && strings.HasPrefix(entry.Name(), chartName) {
-			return tmpDir + "/" + entry.Name(), nil
-		}
-	}
-
-	return "", fmt.Errorf("chart directory not found")
+	return dest, nil
 }
 

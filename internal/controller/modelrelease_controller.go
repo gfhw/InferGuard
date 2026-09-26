@@ -1,12 +1,13 @@
-﻿package controller
+package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -55,7 +56,7 @@ func (r *ModelReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	hr := &helmv1alpha1.ModelRelease{}
 	if err := r.Get(ctx, req.NamespacedName, hr); err != nil {
-		if errors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			key := req.NamespacedName.String()
 			if releaseName, ok := r.releaseNames[key]; ok {
 				r.Watcher.UnregisterRelease(releaseName)
@@ -100,26 +101,44 @@ func (r *ModelReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	// Stable: spec unchanged and already Running 锟?nothing to do.
-	if hr.IsStable() {
-		return ctrl.Result{}, nil
-	}
-
-	// Retries exhausted: permanent failure or too many transient failures.
-	if hr.HasRetriesExhausted() {
-		inferguardlog.Info("Retries exhausted, giving up",
-			"name", hr.Name,
-			"retryCount", hr.Status.RetryCount,
-			"lastError", hr.Status.LastFailureMessage)
-		return ctrl.Result{}, nil
-	}
-
-	// Ensure finalizer is present.
+	// Ensure the finalizer is present before any early return below.
+	//
+	// This must run before the IsStable / retries-exhausted short circuits: a CR
+	// that becomes Running (or gives up) without ever having the finalizer added
+	// would return early forever, so deleting it would skip helm uninstall and
+	// leak the release and its GPU resources.
 	if !controllerutil.ContainsFinalizer(hr, modelReleaseFinalizer) {
 		controllerutil.AddFinalizer(hr, modelReleaseFinalizer)
 		if err := r.Update(ctx, hr); err != nil {
 			return ctrl.Result{}, err
 		}
+	}
+
+	// Stable: spec unchanged and already Running — nothing to do.
+	if hr.IsStable() {
+		return ctrl.Result{}, nil
+	}
+
+	// Retries exhausted: permanent failure, or too many transient failures for
+	// this spec generation. Editing the spec bumps generation and wakes us again.
+	if hr.HasRetriesExhausted() {
+		if hr.Status.LastAttemptedGeneration != hr.Generation {
+			// Record which generation we gave up on. Without this the next spec
+			// edit would look like a fresh, never-attempted generation and the
+			// exhausted counter would keep suppressing reconciliation.
+			abandoned := hr.DeepCopy()
+			abandoned.Status.LastAttemptedGeneration = hr.Generation
+			if err := r.Status().Update(ctx, abandoned); err != nil {
+				inferguardlog.ErrorE(err, "Failed to record abandoned generation",
+					"name", hr.Name, "generation", hr.Generation)
+			}
+		}
+		inferguardlog.Info("Retries exhausted, giving up until the spec changes",
+			"name", hr.Name,
+			"retryCount", hr.Status.RetryCount,
+			"generation", hr.Generation,
+			"lastError", hr.Status.LastFailureMessage)
+		return ctrl.Result{}, nil
 	}
 
 	// Attempt reconciliation.
@@ -157,7 +176,7 @@ func (r *ModelReleaseReconciler) performInstallOrUpgrade(ctx context.Context, hr
 	}
 
 	existing, err := r.HelmManager.GetRelease(releaseName, releaseNs)
-	if err != nil && !errors.IsNotFound(err) {
+	if err != nil && !errors.Is(err, helm.ErrReleaseNotFound) {
 		r.updateStatusFailed(ctx, hr, "failed to query release: "+err.Error())
 		return err
 	}
@@ -196,11 +215,16 @@ func (r *ModelReleaseReconciler) performInstallOrUpgrade(ctx context.Context, hr
 	if err := r.updateStatusSuccess(ctx, hr, rel); err != nil {
 		return err
 	}
+
+	// Register pod monitoring before updating the revision: RegisterRelease
+	// installs a fresh ReleaseConfig, which would otherwise reset Revision to 0.
+	if err := r.managePodMonitor(ctx, hr); err != nil {
+		return err
+	}
 	if rel != nil {
 		r.Watcher.UpdateReleaseRevision(hr.GetReleaseName(), rel.Version)
 	}
-
-	return r.managePodMonitor(ctx, hr)
+	return nil
 }
 
 func (r *ModelReleaseReconciler) performRollback(ctx context.Context, hr *helmv1alpha1.ModelRelease) error {
@@ -259,7 +283,13 @@ func (r *ModelReleaseReconciler) performRollback(ctx context.Context, hr *helmv1
 	}
 
 
-	return r.managePodMonitor(ctx, hr)
+	if err := r.managePodMonitor(ctx, hr); err != nil {
+		return err
+	}
+	if rel != nil {
+		r.Watcher.UpdateReleaseRevision(hr.GetReleaseName(), rel.Version)
+	}
+	return nil
 }
 
 func (r *ModelReleaseReconciler) managePodMonitor(ctx context.Context, hr *helmv1alpha1.ModelRelease) error {
@@ -273,16 +303,6 @@ func (r *ModelReleaseReconciler) managePodMonitor(ctx context.Context, hr *helmv
 		return nil
 	}
 
-	var releaseFilter *podwatch.ReleaseFilter
-	if hr.Spec.PodMonitor.Filter != nil {
-		releaseFilter = &podwatch.ReleaseFilter{
-			OnUnhealthyOnly:  hr.Spec.PodMonitor.Filter.OnUnhealthyOnly,
-			MinRestartCount:  hr.Spec.PodMonitor.Filter.MinRestartCount,
-			IgnoreEventTypes: hr.Spec.PodMonitor.Filter.IgnoreEventTypes,
-			Phases:           hr.Spec.PodMonitor.Filter.Phases,
-		}
-	}
-
 	r.Watcher.RegisterRelease(releaseName, &podwatch.ReleaseConfig{
 		EventSender: podwatch.NewEventSenderWithConfig(
 			hr.GetPodMonitorEndpoint(),
@@ -294,9 +314,7 @@ func (r *ModelReleaseReconciler) managePodMonitor(ctx context.Context, hr *helmv
 			crNamespace: hr.Namespace,
 			crName:      hr.Name,
 		},
-		Filter: releaseFilter,
 		Policies: hr.Spec.Policies,
-		
 	})
 
 	r.releaseNames[key] = releaseName
@@ -373,9 +391,11 @@ func (r *ModelReleaseReconciler) finalizeModelRelease(ctx context.Context, hr *h
 
 	_, err := r.HelmManager.GetRelease(releaseName, releaseNs)
 	if err != nil {
-		if errors.IsNotFound(err) {
+		if errors.Is(err, helm.ErrReleaseNotFound) {
+			// Nothing was ever installed; nothing to uninstall.
 			return nil
 		}
+		return fmt.Errorf("failed to query release before uninstall: %w", err)
 	}
 
 	if err := r.HelmManager.Uninstall(releaseName, releaseNs); err != nil {
@@ -452,7 +472,7 @@ func (u *crStatusUpdater) UpdatePodStatus(ctx context.Context, releaseName strin
 	hr := &helmv1alpha1.ModelRelease{}
 	key := types.NamespacedName{Namespace: u.crNamespace, Name: u.crName}
 	if err := u.client.Get(ctx, key, hr); err != nil {
-		if errors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			inferguardlog.Info("ModelRelease not found, skipping status update",
 				"namespace", u.crNamespace, "name", u.crName)
 			return nil
@@ -463,14 +483,18 @@ func (u *crStatusUpdater) UpdatePodStatus(ctx context.Context, releaseName strin
 	updated := hr.DeepCopy()
 
 	podStatus := helmv1alpha1.PodRuntimeStatus{
-		Namespace: podInfo.Namespace,
-		Name:      podInfo.Name,
-		UID:       podInfo.UID,
-		Phase:     podInfo.Phase,
-		NodeName:  podInfo.NodeName,
-		PodIP:     podInfo.PodIP,
-		Ready:     podInfo.Ready,
-		Restart:   podInfo.Restart,
+		Namespace:             podInfo.Namespace,
+		Name:                  podInfo.Name,
+		UID:                   podInfo.UID,
+		Phase:                 podInfo.Phase,
+		NodeName:              podInfo.NodeName,
+		PodIP:                 podInfo.PodIP,
+		Ready:                 podInfo.Ready,
+		Restart:               podInfo.Restart,
+		OOMKilled:             podInfo.OOMKilled,
+		LastTerminationReason: podInfo.LastTerminationReason,
+		Reason:                podInfo.Reason,
+		Message:               podInfo.Message,
 	}
 
 	if eventType == podwatch.PodEventDeleted {

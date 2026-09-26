@@ -1,4 +1,4 @@
-﻿package v1alpha1
+package v1alpha1
 
 import (
 	"fmt"
@@ -43,16 +43,6 @@ type PodMonitorSpec struct {
 	Endpoint string            `json:"endpoint,omitempty"`
 	Method   string            `json:"method,omitempty"`
 	Headers  map[string]string `json:"headers,omitempty"`
-
-	// Event filter configuration
-	Filter *EventFilterSpec `json:"filter,omitempty"`
-}
-
-type EventFilterSpec struct {
-	OnUnhealthyOnly  bool     `json:"onUnhealthyOnly,omitempty"`
-	MinRestartCount  int32    `json:"minRestartCount,omitempty"`
-	IgnoreEventTypes []string `json:"ignoreEventTypes,omitempty"`
-	Phases           []string `json:"phases,omitempty"`
 }
 
 type PolicyCondition struct {
@@ -82,6 +72,12 @@ type PodRuntimeStatus struct {
 	PodIP     string `json:"podIP,omitempty"`
 	Ready     bool   `json:"ready"`
 	Restart   int32  `json:"restart"`
+
+	// AI-ops diagnostics so `kubectl describe` can show why a pod is unhealthy.
+	OOMKilled             bool   `json:"oomKilled,omitempty"`
+	LastTerminationReason string `json:"lastTerminationReason,omitempty"`
+	Reason                string `json:"reason,omitempty"`
+	Message               string `json:"message,omitempty"`
 }
 
 type ModelReleaseStatus struct {
@@ -167,19 +163,6 @@ func (in *ModelReleaseSpec) DeepCopyInto(out *ModelReleaseSpec) {
 		in, out := &in.Policies, &out.Policies
 		*out = make([]PolicySpec, len(*in))
 		copy(*out, *in)
-	}
-	if in.PodMonitor.Filter != nil {
-		in, out := &in.PodMonitor.Filter, &out.PodMonitor.Filter
-		*out = new(EventFilterSpec)
-		**out = **in
-		if (*in).IgnoreEventTypes != nil {
-			(*out).IgnoreEventTypes = make([]string, len((*in).IgnoreEventTypes))
-			copy((*out).IgnoreEventTypes, (*in).IgnoreEventTypes)
-		}
-		if (*in).Phases != nil {
-			(*out).Phases = make([]string, len((*in).Phases))
-			copy((*out).Phases, (*in).Phases)
-		}
 	}
 }
 
@@ -308,8 +291,19 @@ func (in *ModelRelease) GetWaitTimeout() time.Duration {
 	}
 	return time.Duration(in.Spec.WaitTimeout) * time.Second
 }
+
+// HasRetriesExhausted reports whether we should give up on this CR.
+//
+// Retries are scoped to one spec generation: once the user edits the spec
+// (metadata.generation moves past LastAttemptedGeneration) the previous failures
+// no longer describe the current desired state, so the counter is treated as
+// stale and reconciliation resumes. Without this, a CR that ever burned through
+// its retries would stay dead forever no matter what the user changed.
 func (in *ModelRelease) HasRetriesExhausted() bool {
-	return in.Status.RetryCount >= MaxTransientRetries
+	if in.Status.RetryCount < MaxTransientRetries {
+		return false
+	}
+	return in.Status.LastAttemptedGeneration == in.Generation
 }
 
 func (in *ModelRelease) IsStable() bool {

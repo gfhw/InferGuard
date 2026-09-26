@@ -40,10 +40,10 @@ spec:
                   properties:
                     repository:
                       type: string
-                localPath:
-                  type: string
-                  description: Local path to chart (.tgz or directory), mutually exclusive with repository
                       description: Helm chart repository URL
+                    localPath:
+                      type: string
+                      description: Local path to chart (.tgz or directory), mutually exclusive with repository
                     name:
                       type: string
                       description: Chart name
@@ -51,7 +51,6 @@ spec:
                       type: string
                       description: Chart version
                   required:
-                    - repository
                     - name
                 values:
                   type: object
@@ -71,9 +70,13 @@ spec:
                 atomic:
                   type: boolean
                   description: Atomic operation (auto rollback on failure)
+                wait:
+                  type: boolean
+                  description: Wait for pods to be ready after install/upgrade (default true)
                 waitTimeout:
                   type: integer
                   description: Wait timeout in seconds
+                  format: int64
                 podMonitor:
                   type: object
                   description: Pod monitoring configuration
@@ -93,9 +96,55 @@ spec:
                       additionalProperties:
                         type: string
                       description: HTTP headers for the push endpoint
-                    prometheusAddr:
-                      type: string
-                      description: Address for Prometheus metrics endpoint
+                policies:
+                  type: array
+                  description: Alerting rules. Each policy watches one condition and pushes a webhook notification.
+                  items:
+                    type: object
+                    required:
+                      - name
+                      - condition
+                    properties:
+                      name:
+                        type: string
+                        description: Policy name, unique within the release
+                      condition:
+                        type: object
+                        description: Condition to watch
+                        required:
+                          - type
+                        properties:
+                          type:
+                            type: string
+                            description: Condition type
+                            enum:
+                              - PodRestart
+                              - PodNotReady
+                              - PodCrash
+                              - InferenceLatency
+                              - GPUCacheUsage
+                              - InferenceQueueDepth
+                          threshold:
+                            type: integer
+                            format: int32
+                            description: Threshold. PodRestart/GPUCacheUsage compare raw values, InferenceLatency compares avg ms, InferenceQueueDepth compares waiting requests
+                          window:
+                            type: string
+                            description: Reserved for future time-window based conditions
+                          scope:
+                            type: string
+                            description: Reserved for future policy scoping
+                      action:
+                        type: object
+                        description: What to do when the condition fires
+                        properties:
+                          triggerCount:
+                            type: integer
+                            format: int32
+                            description: Number of consecutive matches required before alerting (default 1)
+                          alertBody:
+                            type: string
+                            description: Raw webhook body. Supports ${release_name} ${pod_name} ${namespace} ${pod_phase} ${pod_restart} ${pod_ip} ${inference_latency_ms} ${gpu_cache_pct}
             status:
               description: ModelReleaseStatus defines the observed state of ModelRelease
               type: object
@@ -131,6 +180,16 @@ spec:
                 observedGeneration:
                   type: integer
                   format: int64
+                lastAttemptedGeneration:
+                  type: integer
+                  format: int64
+                  description: Generation of the last spec that was attempted (used to reset retries after a spec change)
+                retryCount:
+                  type: integer
+                  description: Number of consecutive failed reconcile attempts
+                lastFailureMessage:
+                  type: string
+                  description: Error message from the last failed attempt
                 podMonitorReady:
                   type: boolean
                 revision:
@@ -164,6 +223,14 @@ spec:
                         type: boolean
                       restart:
                         type: integer
+                      oomKilled:
+                        type: boolean
+                      lastTerminationReason:
+                        type: string
+                      reason:
+                        type: string
+                      message:
+                        type: string
       subresources:
         status: {}
       additionalPrinterColumns:
