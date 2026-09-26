@@ -26,9 +26,6 @@ type ModelReleaseSpec struct {
 	// Pod monitor configuration
 	PodMonitor PodMonitorSpec `json:"podMonitor,omitempty"`
 
-	// Policies: alerting rules (condition -> Webhook notification)
-	Policies []PolicySpec `json:"policies,omitempty"`
-
 	// Scheduling declares AI pod scheduling intent (delegated to Volcano).
 	Scheduling SchedulingSpec `json:"scheduling,omitempty"`
 
@@ -43,30 +40,10 @@ type ChartSpec struct {
 	LocalPath  string `json:"localPath,omitempty"`
 }
 
+// PodMonitorSpec controls whether the operator watches the release's pods and
+// reflects their runtime state back into status.podStatuses.
 type PodMonitorSpec struct {
 	Enabled bool `json:"enabled,omitempty"`
-
-	Endpoint string            `json:"endpoint,omitempty"`
-	Method   string            `json:"method,omitempty"`
-	Headers  map[string]string `json:"headers,omitempty"`
-}
-
-type PolicyCondition struct {
-	Type      string `json:"type"`
-	Threshold int32  `json:"threshold"`
-	Window    string `json:"window,omitempty"`
-	Scope     string `json:"scope,omitempty"`
-}
-
-type PolicyAction struct {
-	TriggerCount int32  `json:"triggerCount,omitempty"`
-	AlertBody    string `json:"alertBody,omitempty"`
-}
-
-type PolicySpec struct {
-	Name      string          `json:"name"`
-	Condition PolicyCondition `json:"condition"`
-	Action    PolicyAction    `json:"action"`
 }
 
 // SchedulingSpec declares AI pod scheduling intent. The operator only expresses
@@ -229,18 +206,6 @@ func (in *ModelReleaseSpec) DeepCopyInto(out *ModelReleaseSpec) {
 		*out = &runtime.RawExtension{}
 		**out = **in
 	}
-	if in.PodMonitor.Headers != nil {
-		in, out := &in.PodMonitor.Headers, &out.PodMonitor.Headers
-		*out = make(map[string]string, len(*in))
-		for key, val := range *in {
-			(*out)[key] = val
-		}
-	}
-	if in.Policies != nil {
-		in, out := &in.Policies, &out.Policies
-		*out = make([]PolicySpec, len(*in))
-		copy(*out, *in)
-	}
 	if in.Scheduling.PodGroup != nil {
 		in, out := &in.Scheduling.PodGroup, &out.Scheduling.PodGroup
 		*out = new(PodGroupSpec)
@@ -339,24 +304,6 @@ func (in *ModelRelease) GetReleaseName() string {
 
 func (in *ModelRelease) IsPodMonitorEnabled() bool {
 	return in.Spec.PodMonitor.Enabled
-}
-
-func (in *ModelRelease) GetPodMonitorEndpoint() string {
-	return in.Spec.PodMonitor.Endpoint
-}
-
-func (in *ModelRelease) GetPodMonitorMethod() string {
-	if in.Spec.PodMonitor.Method == "" {
-		return "POST"
-	}
-	return in.Spec.PodMonitor.Method
-}
-
-func (in *ModelRelease) GetPodMonitorHeaders() map[string]string {
-	if in.Spec.PodMonitor.Headers == nil {
-		return map[string]string{}
-	}
-	return in.Spec.PodMonitor.Headers
 }
 
 func (in *ModelRelease) ShouldRollback() bool {

@@ -1,7 +1,6 @@
 package podwatch
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,7 +13,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/gfhw/inferguard/pkg/log"
-	"github.com/gfhw/inferguard/pkg/policy"
 )
 
 const (
@@ -24,8 +22,8 @@ const (
 
 // All Prometheus metrics are AI-inference-specific, scraped live from each
 // inference engine Pod (vLLM / TGI / SGLang) at Prometheus scrape time.
-// Pod-level state (Phase / Ready / Restart) is handled by the Webhook push
-// and CR Status channels ? Prometheus stays focused on AI infra observability.
+// Pod-level state (Phase / Ready / Restart) is handled by the CR Status channel;
+// Prometheus stays focused on AI infra observability.
 
 var (
 	inferenceLatencyDesc = prometheus.NewDesc(
@@ -84,15 +82,14 @@ var (
 	)
 )
 
-// PodCollector implements prometheus.Collector, exposing only AI inference metrics.
-// Pod-level state (Phase / Ready / Restart) is intentionally excluded ? use the
-// Webhook push or CR Status channels for those.
+// PodCollector implements prometheus.Collector, exposing only AI inference
+// metrics. Pod-level state (Phase / Ready / Restart) is handled by the CR
+// status channel, not by Prometheus.
 type PodCollector struct {
-	podInformer  cache.SharedIndexInformer
-	filter       *Filter
-	releases     *ReleaseRegistry
-	httpClient   *http.Client
-	policyEngine *policy.Engine
+	podInformer cache.SharedIndexInformer
+	filter      *Filter
+	releases    *ReleaseRegistry
+	httpClient  *http.Client
 }
 
 func NewPodCollector(podInformer cache.SharedIndexInformer, filter *Filter, releases *ReleaseRegistry) *PodCollector {
@@ -104,11 +101,6 @@ func NewPodCollector(podInformer cache.SharedIndexInformer, filter *Filter, rele
 			Timeout: 5 * time.Second,
 		},
 	}
-}
-
-// SetPolicyEngine injects the policy engine for AI-metrics-based alerting rules.
-func (c *PodCollector) SetPolicyEngine(engine *policy.Engine) {
-	c.policyEngine = engine
 }
 
 func (c *PodCollector) Describe(ch chan<- *prometheus.Desc) {
@@ -156,56 +148,39 @@ func (c *PodCollector) Collect(ch chan<- prometheus.Metric) {
 		}
 
 		// Scrape vLLM / TGI / SGLang /metrics endpoint live.
-		inferenceState := c.scrapeAndEmit(ch, info, releaseName, releaseCfg.Revision)
-
-		// Evaluate AI-metrics-based policies (e.g. InferenceLatency > threshold -> notify)
-		if c.policyEngine != nil && inferenceState != nil {
-			results := c.policyEngine.EvaluateInference(context.Background(),
-				releaseName, info.Namespace, *inferenceState, releaseCfg.Policies)
-
-			for _, r := range results {
-				if releaseCfg.EventSender != nil {
-					body := expandAlertVars(r.AlertBody, info, releaseName, inferenceState)
-					_ = releaseCfg.EventSender.SendRaw(context.Background(), body)
-				}
-			}
-		}
+		c.scrapeAndEmit(ch, info, releaseName, releaseCfg.Revision)
 	}
 }
 
 // scrapeAndEmit fetches /metrics from the inference engine and emits Prometheus
 // metrics under the inferguard_ prefix.
-func (c *PodCollector) scrapeAndEmit(ch chan<- prometheus.Metric, info PodInfo, releaseName string, revision int) *policy.InferenceState {
+func (c *PodCollector) scrapeAndEmit(ch chan<- prometheus.Metric, info PodInfo, releaseName string, revision int) {
 	url := fmt.Sprintf("http://%s:%d/metrics", info.PodIP, defaultInferenceMetricsPort)
 	resp, err := c.httpClient.Get(url)
 	if err != nil {
 		log.Debug("Failed to scrape inference metrics",
 			"pod", info.Name, "url", url, "error", err.Error())
-		return nil
+		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil
+		return
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return nil
+		return
 	}
 
 	engine := detectEngine(string(body))
 	if engine == "" {
 		// Not a recognized inference engine (vLLM / TGI / SGLang); don't emit
-		// mislabeled metrics or alert on unrelated /metrics output.
-		return nil
+		// mislabeled metrics.
+		return
 	}
 	lines := strings.Split(string(body), "\n")
-    
-    state := &policy.InferenceState{
-    	Namespace: info.Namespace,
-    	Name:      info.Name,
-    }
+
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -230,13 +205,11 @@ func (c *PodCollector) scrapeAndEmit(ch chan<- prometheus.Metric, info PodInfo, 
 				inferenceLatencyDesc, prometheus.CounterValue, val,
 				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine, lookupLabel(labels, "model_name"),
 			)
-			state.LatencySumSec = val
 		case strings.HasPrefix(metricName, "vllm:time_per_output_token_seconds_count"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceLatencyCountDesc, prometheus.CounterValue, val,
 				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine, lookupLabel(labels, "model_name"),
 			)
-			state.LatencyCount = val
 		case strings.HasPrefix(metricName, "vllm:time_to_first_token_seconds_sum"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceTTFTDesc, prometheus.CounterValue, val,
@@ -262,7 +235,6 @@ func (c *PodCollector) scrapeAndEmit(ch chan<- prometheus.Metric, info PodInfo, 
 				inferenceWaitingDesc, prometheus.GaugeValue, val,
 				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine,
 			)
-			state.RequestsWaiting = int32(val)
 		case strings.HasPrefix(metricName, "vllm:prompt_tokens_total"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceTokensDesc, prometheus.CounterValue, val,
@@ -278,20 +250,17 @@ func (c *PodCollector) scrapeAndEmit(ch chan<- prometheus.Metric, info PodInfo, 
 				inferenceGPUCacheDesc, prometheus.GaugeValue, val,
 				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine,
 			)
-			state.GPUCachePct = val
 		// TGI (Text Generation Inference) metrics
 		case strings.HasPrefix(metricName, "tgi_request_duration_seconds_sum"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceLatencyDesc, prometheus.CounterValue, val,
 				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine, lookupLabel(labels, "model_name"),
 			)
-			state.LatencySumSec = val
 		case strings.HasPrefix(metricName, "tgi_request_duration_seconds_count"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceLatencyCountDesc, prometheus.CounterValue, val,
 				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine, lookupLabel(labels, "model_name"),
 			)
-			state.LatencyCount = val
 		case metricName == "tgi_request_success_total" || strings.HasPrefix(metricName, "tgi_request_success_total{"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceRequestsDesc, prometheus.CounterValue, val,
@@ -302,7 +271,6 @@ func (c *PodCollector) scrapeAndEmit(ch chan<- prometheus.Metric, info PodInfo, 
 				inferenceWaitingDesc, prometheus.GaugeValue, val,
 				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine,
 			)
-			state.RequestsWaiting = int32(val)
 		case metricName == "tgi_batch_current_size" || strings.HasPrefix(metricName, "tgi_batch_current_size{"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceRunningDesc, prometheus.GaugeValue, val,
@@ -314,13 +282,11 @@ func (c *PodCollector) scrapeAndEmit(ch chan<- prometheus.Metric, info PodInfo, 
 				inferenceLatencyDesc, prometheus.CounterValue, val,
 				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine, lookupLabel(labels, "model_name"),
 			)
-			state.LatencySumSec = val
 		case strings.HasPrefix(metricName, "sglang:time_per_output_token_seconds_count"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceLatencyCountDesc, prometheus.CounterValue, val,
 				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine, lookupLabel(labels, "model_name"),
 			)
-			state.LatencyCount = val
 		case metricName == "sglang:num_requests_running" || strings.HasPrefix(metricName, "sglang:num_requests_running{"):
 			ch <- prometheus.MustNewConstMetric(
 				inferenceRunningDesc, prometheus.GaugeValue, val,
@@ -331,10 +297,8 @@ func (c *PodCollector) scrapeAndEmit(ch chan<- prometheus.Metric, info PodInfo, 
 				inferenceWaitingDesc, prometheus.GaugeValue, val,
 				info.Namespace, info.Name, releaseName, strconv.Itoa(revision), engine,
 			)
-			state.RequestsWaiting = int32(val)
 		}
 	}
-	return state
 }
 
 func extractLabels(line string) map[string]string {
@@ -361,11 +325,6 @@ func lookupLabel(labels map[string]string, key string) string {
 	}
 	return ""
 }
-
-
-
-
-
 
 func detectEngine(metricsBody string) string {
 	if strings.Contains(metricsBody, "tgi_") {

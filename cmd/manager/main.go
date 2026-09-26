@@ -17,7 +17,6 @@ import (
 	helmv1alpha1 "github.com/gfhw/inferguard/api/v1alpha1"
 	"github.com/gfhw/inferguard/internal/controller"
 	"github.com/gfhw/inferguard/pkg/podwatch"
-	"github.com/gfhw/inferguard/pkg/policy"
 )
 
 var (
@@ -65,12 +64,6 @@ func main() {
 	}
 
 	watcher := podwatch.NewGlobalPodWatcher(k8sClient, 5*time.Minute)
-
-	policyEngine := policy.NewEngine()
-	// Set the policy engine before Start so the worker pool and collector are
-	// constructed with it — otherwise pod events arriving between Start and the
-	// later SetPolicyEngine call would be silently skipped.
-	watcher.SetPolicyEngine(policyEngine)
 
 	if err := watcher.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "unable to start global pod watcher")

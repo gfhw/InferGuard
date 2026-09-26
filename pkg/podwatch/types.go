@@ -4,8 +4,6 @@ import (
 	"context"
 	"sync"
 
-	helmv1alpha1 "github.com/gfhw/inferguard/api/v1alpha1"
-
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -103,11 +101,9 @@ type StatusUpdater interface {
 	UpdatePodStatus(ctx context.Context, releaseName string, pod PodInfo, eventType PodEventType) error
 }
 
-// ReleaseConfig holds per-release sender and status updater configuration.
+// ReleaseConfig holds per-release status updater configuration.
 type ReleaseConfig struct {
-	EventSender   *EventSender
 	StatusUpdater StatusUpdater
-	Policies      []helmv1alpha1.PolicySpec
 	Revision      int
 }
 

@@ -304,17 +304,11 @@ func (r *ModelReleaseReconciler) managePodMonitor(ctx context.Context, hr *helmv
 	}
 
 	r.Watcher.RegisterRelease(releaseName, &podwatch.ReleaseConfig{
-		EventSender: podwatch.NewEventSenderWithConfig(
-			hr.GetPodMonitorEndpoint(),
-			hr.GetPodMonitorMethod(),
-			hr.GetPodMonitorHeaders(),
-		),
 		StatusUpdater: &crStatusUpdater{
 			client:      r.Client,
 			crNamespace: hr.Namespace,
 			crName:      hr.Name,
 		},
-		Policies: hr.Spec.Policies,
 	})
 
 	r.releaseNames[key] = releaseName

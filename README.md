@@ -45,11 +45,7 @@ Prometheus 每次 scrape 时,Collector **现场** HTTP GET 每个推理 Pod 的 
 
 关键差异:**所有指标注入 `release` + `revision` label**。vLLM 自己不知道"我属于哪个 Helm release、是第几次部署",而 InferGuard 管生命周期、恰好知道。这让 Grafana 能按部署版本分组对比延迟/吞吐——升级后性能劣化一目了然。
 
-### 4. AI 阈值策略
-
-声明式定义 AI 指标条件(`InferenceLatency` / `GPUCacheUsage` / `InferenceQueueDepth`),支持 `triggerCount`(连续 N 次才告警)和 `alertBody` 自定义告警体。
-
-> **职责边界**:运行期的持续阈值监控,理想归宿是 Prometheus alerting rules + Alertmanager(支持 `for` 抖动免疫、分组、静默、路由)。InferGuard 的差异化不在"告警",而在**版本画像**和**验证闭环**(见下)。
+> **告警交给谁**:运行期的持续阈值监控交给 Prometheus alerting rules + Alertmanager(支持 `for` 抖动免疫、分组、静默、路由)。InferGuard 只负责把 AI 指标**采集出来并关联 revision**,不抢告警的活。
 
 ---
 
@@ -137,22 +133,6 @@ spec:
 
   podMonitor:
     enabled: true
-    endpoint: "https://alerts.example.com/webhook"
-
-  policies:
-    - name: high-latency-alert
-      condition:
-        type: InferenceLatency
-        threshold: 5000
-      action:
-        triggerCount: 3
-        alertBody: |
-          {
-            "release": "${release_name}",
-            "pod": "${pod_name}",
-            "latency_ms": ${inference_latency_ms},
-            "severity": "warning"
-          }
 ```
 
 ---
@@ -227,11 +207,8 @@ curl http://localhost:8080/metrics | grep inferguard_
     |   +-- queue.go          # UID 去重队列(类型升级合并)
     |   +-- worker.go         # 单 Worker 串行,回写 CR 状态
     |   +-- collector.go      # Prometheus Collector + AI 指标采集
-    |   +-- sender.go         # AI 告警 Webhook 发送
-    |   +-- alert.go          # 告警占位符替换
     |   +-- types.go          # 核心数据结构
     |   +-- filter.go         # Pod label 过滤
-    +-- policy/               # AI 策略引擎(阈值条件)
     +-- log/                  # 日志工具
 ```
 

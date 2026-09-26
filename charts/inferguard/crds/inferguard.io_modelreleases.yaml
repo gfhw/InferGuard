@@ -84,67 +84,6 @@ spec:
                     enabled:
                       type: boolean
                       description: Enable pod monitoring
-                    endpoint:
-                      type: string
-                      description: HTTP endpoint for event push (callback)
-                    method:
-                      type: string
-                      description: HTTP method (POST, PUT, etc.)
-                      default: POST
-                    headers:
-                      type: object
-                      additionalProperties:
-                        type: string
-                      description: HTTP headers for the push endpoint
-                policies:
-                  type: array
-                  description: Alerting rules. Each policy watches one condition and pushes a webhook notification.
-                  items:
-                    type: object
-                    required:
-                      - name
-                      - condition
-                    properties:
-                      name:
-                        type: string
-                        description: Policy name, unique within the release
-                      condition:
-                        type: object
-                        description: Condition to watch
-                        required:
-                          - type
-                        properties:
-                          type:
-                            type: string
-                            description: Condition type
-                            enum:
-                              - PodRestart
-                              - PodNotReady
-                              - PodCrash
-                              - InferenceLatency
-                              - GPUCacheUsage
-                              - InferenceQueueDepth
-                          threshold:
-                            type: integer
-                            format: int32
-                            description: Threshold. PodRestart/GPUCacheUsage compare raw values, InferenceLatency compares avg ms, InferenceQueueDepth compares waiting requests
-                          window:
-                            type: string
-                            description: Reserved for future time-window based conditions
-                          scope:
-                            type: string
-                            description: Reserved for future policy scoping
-                      action:
-                        type: object
-                        description: What to do when the condition fires
-                        properties:
-                          triggerCount:
-                            type: integer
-                            format: int32
-                            description: Number of consecutive matches required before alerting (default 1)
-                          alertBody:
-                            type: string
-                            description: Raw webhook body. Supports ${release_name} ${pod_name} ${namespace} ${pod_phase} ${pod_restart} ${pod_ip} ${inference_latency_ms} ${gpu_cache_pct}
                 scheduling:
                   type: object
                   description: AI pod scheduling intent (delegated to Volcano)

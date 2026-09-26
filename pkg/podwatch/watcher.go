@@ -13,7 +13,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/gfhw/inferguard/pkg/log"
-	"github.com/gfhw/inferguard/pkg/policy"
 )
 
 type GlobalPodWatcher struct {
@@ -27,9 +26,7 @@ type GlobalPodWatcher struct {
 	collector  *PodCollector
 	filter     *Filter
 
-	releases      *ReleaseRegistry
-
-	policyEngine  *policy.Engine
+	releases *ReleaseRegistry
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -80,7 +77,6 @@ func (w *GlobalPodWatcher) Start(ctx context.Context) error {
 	})
 
 	w.collector = NewPodCollector(w.podInformer, w.filter, w.releases)
-	w.collector.SetPolicyEngine(w.policyEngine)
 
 	w.workerPool = NewWorkerPool(w.queue, w.k8sClient, w.collector, w.releases)
 
@@ -120,25 +116,9 @@ func (w *GlobalPodWatcher) RegisterRelease(releaseName string, cfg *ReleaseConfi
 	log.Info("Release registered", "release", releaseName)
 }
 
-func (w *GlobalPodWatcher) SetPolicyEngine(engine *policy.Engine) {
-	w.policyEngine = engine
-	if w.collector != nil {
-		w.collector.SetPolicyEngine(engine)
-	}
-}
-
-
-
 func (w *GlobalPodWatcher) UnregisterRelease(releaseName string) {
 	w.releases.Unregister(releaseName)
 	log.Info("Release unregistered", "release", releaseName)
-}
-
-func (w *GlobalPodWatcher) UpdateReleaseConfig(releaseName string, endpoint string, method string, headers map[string]string) {
-	cfg := w.releases.Get(releaseName)
-	if cfg != nil && cfg.EventSender != nil {
-		cfg.EventSender.UpdateConfig(endpoint, method, headers)
-	}
 }
 
 func (w *GlobalPodWatcher) handlePodAdd(obj interface{}) {

@@ -23,9 +23,18 @@ spec:
   # atomic: true
   # waitTimeout: 300
 
+  # 调度意图：委托 Volcano 做 gang/队列调度（不实现调度）
+  # scheduling:
+  #   schedulerName: volcano
+  #   podGroup:
+  #     minMember: 2
+  #     queue: default
+
+  # 部署后验证：跑 robot 断言，结果回写 status.verification
+  # verification:
+  #   enabled: true
+  #   suites: [smoke, regression]
+
+  # 监控 Pod 状态并回写 status.podStatuses
   podMonitor:
     enabled: true
-    endpoint: "http://monitoring-service:8080/api/pod-events"
-    method: "POST"
-    headers:
-      Authorization: "Bearer my-token"
