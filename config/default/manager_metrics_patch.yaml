@@ -10,4 +10,4 @@ spec:
       containers:
       - name: manager
         args:
-        - "--metrics-bind-address=127.0.0.1:8080"
+        - "--metrics-bind-address=:8080"

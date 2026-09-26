@@ -44,7 +44,6 @@ Kubernetes 上部署 AI 推理模型不仅仅是 helm install。模型 Pod 要�
 
 ### Per-release 精细化控制
 
-- **事件过滤器**: onUnhealthyOnly / minRestartCount / ignoreEventTypes 按 release 独立配置
 - **独立 Webhook**: 每个 ModelRelease 可推送到不同的 URL，带自定义 headers
 - **独立策略**: 每个 release 可配不同的告警规则
 
@@ -96,9 +95,6 @@ spec:
   podMonitor:
     enabled: true
     endpoint: "https://alerts.example.com/webhook"
-    filter:
-      onUnhealthyOnly: true
-      minRestartCount: 1
   policies:
     - name: high-latency-alert
       condition:

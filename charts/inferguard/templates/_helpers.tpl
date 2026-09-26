@@ -1,8 +1,8 @@
-{{- define "watchpod-operator.name" -}}
+{{- define "inferguard.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
-{{- define "watchpod-operator.fullname" -}}
+{{- define "inferguard.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -15,27 +15,27 @@
 {{- end }}
 {{- end }}
 
-{{- define "watchpod-operator.chart" -}}
+{{- define "inferguard.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
-{{- define "watchpod-operator.labels" -}}
-helm.sh/chart: {{ include "watchpod-operator.chart" . }}
-{{ include "watchpod-operator.selectorLabels" . }}
+{{- define "inferguard.labels" -}}
+helm.sh/chart: {{ include "inferguard.chart" . }}
+{{ include "inferguard.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
-{{- define "watchpod-operator.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "watchpod-operator.name" . }}
+{{- define "inferguard.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "inferguard.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
-{{- define "watchpod-operator.serviceAccountName" -}}
+{{- define "inferguard.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create }}
-{{- default (include "watchpod-operator.fullname" .) .Values.serviceAccount.name }}
+{{- default (include "inferguard.fullname" .) .Values.serviceAccount.name }}
 {{- else }}
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}

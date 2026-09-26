@@ -2,19 +2,19 @@
 # This file is used to track the info used to scaffold your project
 # and allow the plugins properly work.
 # More info: https://book.kubebuilder.io/reference/project-config.html
-domain: watchpod.io
+domain: inferguard.io
 layout:
 - go.kubebuilder.io/v4
-projectName: watchpod-operator
-repo: watchpod
+projectName: inferguard-operator
+repo: github.com/gfhw/inferguard
 resources:
 - api:
     crdVersion: v1
     namespaced: true
   controller: true
-  domain: watchpod.io
-  group: helm
-  kind: HelmRelease
-  path: watchpod/api/v1alpha1
+  domain: inferguard.io
+  group: inferguard
+  kind: ModelRelease
+  path: api/v1alpha1
   version: v1alpha1
 version: "3"

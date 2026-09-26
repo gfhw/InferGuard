@@ -1,7 +1,7 @@
 replicaCount: 1
 
 image:
-  repository: inferguard
+  repository: ghcr.io/gfhw/inferguard
   pullPolicy: IfNotPresent
   tag: "latest"
 
