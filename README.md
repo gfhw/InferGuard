@@ -1,6 +1,6 @@
 # InferGuard
 
-AI 推理 Pod 全生命周期管理 Operator —— 声明式部署、实时监控告警、Prometheus 指标出口。一个 CRD 管到底。
+面向 AI 推理 Pod 的 Kubernetes Operator —— 声明式 Helm 生命周期管理 + 推理指标版本画像 + 部署后验证闭环。
 
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://golang.org/dl/)
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-1.28+-326CE5?style=flat&logo=kubernetes)](https://kubernetes.io/)
@@ -10,42 +10,75 @@ AI 推理 Pod 全生命周期管理 Operator —— 声明式部署、实时监�
 
 ## 定位
 
-Kubernetes 上部署 AI 推理模型不仅仅是 helm install。模型 Pod 要经历 GPU 调度、权重下载(5GB+)、显存分配、预热推理——然后 7x24 小时对外服务。任何时候都可能 GPU OOM、推理延迟飙升、或静默退化。
+Kubernetes 上部署 AI 推理模型不仅仅是 `helm install`。模型 Pod 要经历 GPU 调度、权重下载(5GB+)、显存分配、预热推理——然后 7x24 小时对外服务。任何时候都可能 GPU OOM、推理延迟飙升、或静默退化。
 
-**InferGuard 覆盖 AI 推理 Pod 的完整生命周期：从 Helm 部署到运行时监控再到智能告警。** Helm 的 --wait --atomic 只管「部署成功那一刻」，之后 Pod 崩了 Helm 不管。InferGuard 把 Helm 拉进 Kubernetes 的 Reconcile 循环——让 Helm Release 像 Deployment 一样具备声明式管理能力。
+Helm 的 `--wait --atomic` 只管「Pod Ready 那一刻」,但 **Pod Ready ≠ 模型真的能推理**——探针只能回答"进程还活着吗"(布尔),回答不了"推理质量达标吗"(定量 SLA)。
+
+**InferGuard 聚焦的正是这个缝隙**:把 Helm 拉进 Kubernetes 的 Reconcile 循环,让 Helm Release 像 Deployment 一样具备声明式管理能力;同时把**部署版本(revision)**与**推理指标**、**验证结果**关联起来,回答"这次升级有没有劣化"。
 
 ---
 
 ## 核心能力
 
-### Helm 声明式生命周期管理
+### 1. Helm 声明式生命周期管理
 
 | 操作 | 方式 |
 |------|------|
 | 部署模型 | 创建 CR -> Operator 执行 helm install |
 | 升级 | 修改 values 或 chart.version -> 自动 helm upgrade |
-| 回滚 | 设置 targetRevision -> helm rollback，成功后自动对齐 spec(version + values) |
-| 卸载 | 删除 CR -> Finalizer 触发 helm uninstall，释放 GPU 资源 |
+| 回滚 | 设置 targetRevision -> helm rollback,成功后自动对齐 spec(version + values) |
+| 卸载 | 删除 CR -> Finalizer 触发 helm uninstall,释放 GPU 资源 |
 | 本地 Chart | chart.localPath 直接加载 .tgz 或目录 |
 | Atomic 升级 | atomic: true -> 升级失败自动 rollback |
 
-### AI 推理实时监控
+内置错误分类(permanent vs transient)、指数退避重试(最多 10 次)、generation 感知的 retry 幂等(spec 变化自动重置重试)。
 
-- **Prometheus 专做 AI 指标**(推理延迟、TTFT、Token 吞吐、GPU KV-Cache)。Pod 状态(Phase/Ready/Restart)走 Webhook Push 和 CR Status。
-- **主动抓取**: Prometheus 每次 scrape 时，Collector 实时 HTTP GET 每个推理 Pod 的 /metrics(vLLM/TGI/SGLang)，零 Informer 缓存依赖。
-- **三路输出**: HTTP Webhook Push(告警) + Prometheus Pull(Grafana) + CR Status 回写(kubectl 直接看)。
+### 2. Pod 状态自描述
 
-### 智能策略告警
+`SharedInformer` 监听 Helm 管理的 Pod,通过 **UID 去重队列(单 map + 类型升级合并)** 单 worker 串行消费,实时 Get 后回写到 CR 的 `status.podStatuses`。
 
-- **条件检测**: 声明式定义 Pod 状态条件(PodRestart、PodNotReady、PodCrash)和 AI 指标条件(InferenceLatency、GPUCacheUsage、InferenceQueueDepth)
-- **触发计数**: 支持 triggerCount，条件连续满足 N 次才告警，避免抖动
-- **自定义告警体**: alertBody 支持占位符 ${release_name} ${pod_name} ${namespace} ${pod_phase} ${pod_restart} ${pod_ip} ${inference_latency_ms} ${gpu_cache_pct}
-- **设计理念**: 策略只做告警推送，不做自动回滚——生产环境下机器决策风险太高，人工介入是最佳实践
+`kubectl describe modelrelease` 能直接看到每个 Pod 的 phase/ready/restart,以及 **OOMKilled / 退出原因 / reason / message** 等 AI 运维诊断信息。
 
-### Per-release 精细化控制
+### 3. AI 指标采集(带 revision 版本画像)
 
-- **独立 Webhook**: 每个 ModelRelease 可推送到不同的 URL，带自定义 headers
-- **独立策略**: 每个 release 可配不同的告警规则
+Prometheus 每次 scrape 时,Collector **现场** HTTP GET 每个推理 Pod 的 `:8000/metrics`,解析 vLLM/TGI/SGLang 原生指标,归一化后以 `inferguard_` 前缀重新暴露。
+
+关键差异:**所有指标注入 `release` + `revision` label**。vLLM 自己不知道"我属于哪个 Helm release、是第几次部署",而 InferGuard 管生命周期、恰好知道。这让 Grafana 能按部署版本分组对比延迟/吞吐——升级后性能劣化一目了然。
+
+### 4. AI 阈值策略
+
+声明式定义 AI 指标条件(`InferenceLatency` / `GPUCacheUsage` / `InferenceQueueDepth`),支持 `triggerCount`(连续 N 次才告警)和 `alertBody` 自定义告警体。
+
+> **职责边界**:运行期的持续阈值监控,理想归宿是 Prometheus alerting rules + Alertmanager(支持 `for` 抖动免疫、分组、静默、路由)。InferGuard 的差异化不在"告警",而在**版本画像**和**验证闭环**(见下)。
+
+---
+
+## 规划中的能力
+
+### 部署后验证闭环(robot operator)
+
+> 字段与状态机已定义,逻辑待接线(配合独立的 robot operator)。
+
+```
+helm 部署成功 → 创建 InferenceCheck CR → robot operator 起 Job 跑 Robot 断言
+→ 回写 verified/degraded → InferGuard watch 并写回 status.verification
+```
+
+`status.verification.phase` 独立于 `status.phase`(后者只表达 Helm 生命周期),取值:
+
+| phase | 含义 |
+|-------|------|
+| Skipped | 未启用验证(部署即视为可用) |
+| Pending | 验证 CR 已创建,用例未跑完 |
+| Verified | 全部断言通过 |
+| Degraded | 有断言失败 |
+| Unknown | 验证出错/超时,无法判定 |
+
+**分层定位**:探针管"就绪"(进程/服务活着),robot 验证管"质量验收"(TTFT/吞吐/KV-cache 定量断言 + 升级回归),两者互补。
+
+### 火山调度委托
+
+`spec.scheduling` 声明 AI Pod 的调度意图(`schedulerName: volcano` + `podGroup` 的 gang 调度配置)。**InferGuard 只声明意图、创建 PodGroup 委托给 Volcano,不实现调度算法**——调度是集群控制平面的职责,不是应用控制器的职责。
 
 ---
 
@@ -54,21 +87,18 @@ Kubernetes 上部署 AI 推理模型不仅仅是 helm install。模型 Pod 要�
 ```
 ModelRelease CR ---> Controller (Reconcile)
                        +-- Helm SDK: install/upgrade/rollback/uninstall
-                       +-- 错误分类: permanent vs transient
-                       +-- 指数退避重试(最多10次)
+                       +-- 错误分类 + 指数退避 + generation 感知 retry
+                       +-- 声明调度意图(scheduling)/ 验证意图(verification)
 
 SharedInformer (watch Helm Pods)
-  +-- PodEventQueue (UID 去重, 非阻塞通知)
-      +-- WorkerPool (单 Worker 串行)
+  +-- PodEventQueue(UID 去重 + 类型升级合并)
+      +-- WorkerPool(单 Worker 串行)
           +-- API Server 实时 Get(非 Informer 缓存)
-          +-- Webhook Push(PodEvent JSON + 策略告警)
-          +-- CR Status 回写
-          +-- Policy Engine -> 条件计数 + 告警推送
+          +-- CR Status 回写(含 OOM/退出原因)
 
-Prometheus Collector (主动 scrape, 不依赖 Informer 缓存)
-  +-- HTTP GET podIP:8000/metrics (vLLM/TGI/SGLang)
-      +-- 解析 vLLM 指标 -> 以 inferguard_ 前缀重新暴露
-          +-- 同时评估 AI 策略(InferenceLatency 等)
+Prometheus Collector(被动两段 pull)
+  +-- HTTP GET podIP:8000/metrics(vLLM/TGI/SGLang)
+      +-- 归一化 -> inferguard_ 前缀 + release/revision label
 ```
 
 ---
@@ -91,10 +121,24 @@ spec:
     model: "meta-llama/Meta-Llama-3-8B-Instruct"
     replicas: 2
   # atomic: true  # 升级失败自动回滚
-  # wait: false  # 默认 true，设为 false 不等待 Pod 就绪
+  # wait: false  # 默认 true,设为 false 不等待 Pod 就绪
+
+  # 调度意图:委托 Volcano 做 gang/队列调度(不实现调度)
+  scheduling:
+    schedulerName: volcano
+    podGroup:
+      minMember: 2
+      queue: default
+
+  # 部署后验证:跑 robot 断言,结果回写 status.verification
+  verification:
+    enabled: true
+    suites: [smoke, regression]
+
   podMonitor:
     enabled: true
     endpoint: "https://alerts.example.com/webhook"
+
   policies:
     - name: high-latency-alert
       condition:
@@ -109,61 +153,24 @@ spec:
             "latency_ms": ${inference_latency_ms},
             "severity": "warning"
           }
-    - name: pod-crash-alert
-      condition:
-        type: PodCrash
-      action:
-        triggerCount: 1
-        alertBody: |
-          {
-            "release": "${release_name}",
-            "pod": "${pod_name}",
-            "phase": "${pod_phase}",
-            "severity": "critical"
-          }
 ```
 
 ---
 
 ## Prometheus 指标
 
-Prometheus 只暴露 AI 推理指标，Pod 状态指标请走 Webhook Push 或 CR Status 通道。
+只暴露 AI 推理指标(带 `namespace` / `pod` / `release` / `revision` / `engine` / `model` label)。
 
-| 指标 | Labels | 说明 |
-|------|--------|------|
-| inferguard_inference_latency_seconds | namespace, pod, release, revision, engine, model | 逐 token 生成延迟(sum) |
-| inferguard_inference_latency_seconds_count | namespace, pod, release, revision, engine, model | 逐 token 生成延迟(count) |
-| inferguard_inference_time_to_first_token_seconds | namespace, pod, release, revision, engine, model | TTFT 首 token 延迟(sum) |
-| inferguard_inference_time_to_first_token_seconds_count | namespace, pod, release, revision, engine, model | TTFT 首 token 延迟(count) |
-| inferguard_inference_requests_total | namespace, pod, release, revision, engine, model | 成功请求总数 |
-| inferguard_inference_requests_running | namespace, pod, release, revision, engine | 当前正在处理的请求数 |
-| inferguard_inference_requests_waiting | namespace, pod, release, revision, engine | 排队等待的请求数 |
-| inferguard_inference_tokens_total | namespace, pod, release, revision, engine, kind | Token 总数(kind=prompt|generation) |
-| inferguard_inference_gpu_cache_usage_percent | namespace, pod, release, revision, engine | GPU KV-Cache 使用率 |
+| 指标 | 说明 |
+|------|------|
+| inferguard_inference_latency_seconds{,_count} | 逐 token 生成延迟(sum/count) |
+| inferguard_inference_time_to_first_token_seconds{,_count} | TTFT 首 token 延迟(sum/count) |
+| inferguard_inference_requests_total | 成功请求总数 |
+| inferguard_inference_requests_running / _waiting | 运行中 / 排队请求数 |
+| inferguard_inference_tokens_total | Token 总数(kind=prompt\|generation) |
+| inferguard_inference_gpu_cache_usage_percent | GPU KV-Cache 使用率 |
 
-**工作原理**: Prometheus scrape /metrics -> InferGuard Collector 对每个已注册的推理 Pod 执行 HTTP GET podIP:8000/metrics -> 解析 vLLM 原生指标 -> 以 inferguard_ 前缀重新暴露。零额外 exporter，零 Informer 缓存依赖。
-
----
-
-## Push 事件格式
-
-```json
-{
-  "type": "MODIFIED",
-  "pod": {
-    "namespace": "production",
-    "name": "llama-3-8b-abc123",
-    "phase": "Running",
-    "ready": true,
-    "restart": 0
-  },
-  "oldPod": {"phase": "Pending", "ready": false, "restart": 0},
-  "releaseName": "llama-3-8b",
-  "timestamp": 1720456789
-}
-```
-
-策略告警使用用户自定义 JSON 格式(通过 alertBody 定义)，支持占位符变量替换。
+**工作原理**:Prometheus scrape /metrics -> Collector 对每个已注册的推理 Pod 执行 HTTP GET `podIP:8000/metrics` -> 解析 vLLM/TGI/SGLang 原生指标 -> 以 `inferguard_` 前缀重新暴露并注入 release/revision label。零额外 exporter,零 Informer 缓存依赖。
 
 ---
 
@@ -171,13 +178,15 @@ Prometheus 只暴露 AI 推理指标，Pod 状态指标请走 Webhook Push 或 C
 
 | 决策 | 理由 |
 |------|------|
-| **UID 去重队列** | 比时间窗口去重更简单、准确、CrashLoopBackOff 天然免疫 |
-| **API Server 实时 Get(非 Informer 缓存)** | 拒绝可能过期的缓存数据，每次事件都从 API Server 获取当前状态 |
-| **单 Worker 串行消费** | 无需锁，无并发竞争，天然有序 |
-| **Prometheus 主动 scrape** | 不依赖 Informer 缓存，直接从推理引擎抓取指标 |
-| **策略只告警不自愈** | 生产环境机器决策风险太高，人决策更安全。告警推送 + 人工介入是最佳实践 |
-| **Prometheus 指标注入 Helm revision** | 业界首创将 Helm revision 作为 Prometheus label，Grafana 可按版本分组对比延迟/吞吐，升级后性能劣化一目了然 |
-| **回滚后全量对齐 spec** | 回滚后同步 chart.version + values + ObservedGeneration，避免 spec 与实际状态脱节 |
+| **UID 去重 + 类型升级合并** | 单 map 按 UID 去重,`DELETED>MODIFIED>ADDED` 升级合并——既防队列被打爆,又保证事件类型不失真 |
+| **API Server 实时 Get(非 Informer 缓存)** | 拒绝可能过期的缓存数据,每次事件都从 API Server 获取当前状态 |
+| **单 Worker 串行消费** | 无需锁,无并发竞争,天然有序 |
+| **Prometheus 主动 scrape(两段 pull)** | scrape 时现场抓推理引擎,不依赖缓存 |
+| **注入 Helm revision 作 Prometheus label** | 按部署版本分组对比延迟/吞吐,升级劣化一目了然 |
+| **回滚后全量对齐 spec** | 回滚后同步 chart.version + values,避免 spec 与实际状态脱节 |
+| **operator 不抢告警的活** | 通用 Pod 告警交给 kube-state-metrics,持续阈值交给 Alertmanager;operator 聚焦版本画像 + 验证闭环 |
+| **调度只声明不实现** | 调度是控制平面职责,operator 声明意图 + 创建 PodGroup 委托 Volcano |
+| **探针 vs robot 分层** | 探针判"就绪"(布尔),robot 判"质量验收"(定量 SLA + 回归),两者互补 |
 
 ---
 
@@ -185,13 +194,13 @@ Prometheus 只暴露 AI 推理指标，Pod 状态指标请走 Webhook Push 或 C
 
 ```bash
 # 1. 安装 CRD
-make install
+kubectl apply -f config/crd/bases/inferguard.io_modelreleases.yaml
 
 # 2. 启动 operator(本地开发)
-make run
+go run ./cmd/manager
 
 # 3. 创建 ModelRelease
-kubectl apply -f config/samples/inferguard_v1alpha1_modelrelease.yaml
+kubectl apply -f config/samples/modelrelease_v1alpha1_modelrelease.yaml
 
 # 4. 查看状态
 kubectl get modelrelease -n production
@@ -206,23 +215,23 @@ curl http://localhost:8080/metrics | grep inferguard_
 ## 项目结构
 
 ```
-+-- api/v1alpha1/             # CRD 定义(ModelRelease)
++-- api/v1alpha1/             # CRD 定义(ModelRelease + 调度/验证字段)
 +-- cmd/manager/              # Operator 入口
-+-- config/samples/           # CR 示例
++-- config/                   # CRD / RBAC / Prometheus / 样本
 +-- internal/
 |   +-- controller/           # Reconcile 控制器(Helm 生命周期)
 |   +-- helm/                 # Helm SDK 封装
 +-- pkg/
     +-- podwatch/             # Pod 监控子系统
     |   +-- watcher.go        # SharedInformer + 事件路由
-    |   +-- queue.go          # UID 去重队列
-    |   +-- worker.go         # 单 Worker 串行处理
+    |   +-- queue.go          # UID 去重队列(类型升级合并)
+    |   +-- worker.go         # 单 Worker 串行,回写 CR 状态
     |   +-- collector.go      # Prometheus Collector + AI 指标采集
-    |   +-- sender.go         # HTTP Push 事件发送
-    |   +-- alert.go          # 告警占位符变量替换
+    |   +-- sender.go         # AI 告警 Webhook 发送
+    |   +-- alert.go          # 告警占位符替换
     |   +-- types.go          # 核心数据结构
-    +-- policy/               # 策略引擎(条件检测 + 告警)
-    |   +-- engine.go
+    |   +-- filter.go         # Pod label 过滤
+    +-- policy/               # AI 策略引擎(阈值条件)
     +-- log/                  # 日志工具
 ```
 
@@ -235,6 +244,6 @@ curl http://localhost:8080/metrics | grep inferguard_
 - Helm 3.14+
 
 推理引擎 Prometheus 指标兼容性:
-- vLLM: 全支持（9 项指标）
+- vLLM: 全支持(9 项指标)
 - TGI (Text Generation Inference): 支持请求延迟/成功率/队列深度/批处理大小
 - SGLang: 支持推理延迟/等待队列/运行请求数
