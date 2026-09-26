@@ -141,6 +141,9 @@ func (c *PodCollector) Collect(ch chan<- prometheus.Metric) {
 		if releaseCfg == nil {
 			continue
 		}
+		if !releaseCfg.ScrapeMetrics {
+			continue
+		}
 
 		info := ConvertToPodInfo(pod)
 		if !info.Ready || info.PodIP == "" {

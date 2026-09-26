@@ -23,8 +23,8 @@ type ModelReleaseSpec struct {
 	Wait           *bool  `json:"wait,omitempty"`
 	WaitTimeout    int64  `json:"waitTimeout,omitempty"`
 
-	// Pod monitor configuration
-	PodMonitor PodMonitorSpec `json:"podMonitor,omitempty"`
+	// Metrics controls AI metrics scraping into Prometheus.
+	Metrics MetricsSpec `json:"metrics,omitempty"`
 
 	// Scheduling declares AI pod scheduling intent (delegated to Volcano).
 	Scheduling SchedulingSpec `json:"scheduling,omitempty"`
@@ -40,9 +40,10 @@ type ChartSpec struct {
 	LocalPath  string `json:"localPath,omitempty"`
 }
 
-// PodMonitorSpec controls whether the operator watches the release's pods and
-// reflects their runtime state back into status.podStatuses.
-type PodMonitorSpec struct {
+// MetricsSpec controls whether the operator scrapes AI inference metrics from
+// the release's pods and exposes them to Prometheus. Pod status write-back to
+// status.podStatuses is always on and is NOT gated by this switch.
+type MetricsSpec struct {
 	Enabled bool `json:"enabled,omitempty"`
 }
 
@@ -50,8 +51,12 @@ type PodMonitorSpec struct {
 // this intent (and creates the Volcano PodGroup); the actual scheduling decision
 // is delegated to Volcano / kube-scheduler.
 type SchedulingSpec struct {
-	// SchedulerName is the scheduler for the release's pods. Empty means the
-	// cluster default scheduler. Set to "volcano" to enable gang/queue scheduling.
+	// Enabled turns on scheduler intent declaration. When false the release uses
+	// the cluster default scheduler.
+	Enabled bool `json:"enabled,omitempty"`
+
+	// SchedulerName is the scheduler for the release's pods. Defaults to
+	// "volcano" when Enabled.
 	SchedulerName string `json:"schedulerName,omitempty"`
 
 	// PodGroup configures Volcano gang scheduling (only relevant when
@@ -302,10 +307,6 @@ func (in *ModelRelease) GetReleaseName() string {
 	return in.Name
 }
 
-func (in *ModelRelease) IsPodMonitorEnabled() bool {
-	return in.Spec.PodMonitor.Enabled
-}
-
 func (in *ModelRelease) ShouldRollback() bool {
 	return in.Spec.TargetRevision != "" && in.Spec.TargetRevision != fmt.Sprintf("%d", in.Status.Revision)
 }
@@ -348,7 +349,7 @@ func (in *ModelRelease) IsVerificationEnabled() bool {
 
 // UseVolcanoScheduler reports whether the release declares Volcano scheduling.
 func (in *ModelRelease) UseVolcanoScheduler() bool {
-	return in.Spec.Scheduling.SchedulerName == "volcano"
+	return in.Spec.Scheduling.Enabled
 }
 
 // HasRetriesExhausted reports whether we should give up on this CR.

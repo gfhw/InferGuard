@@ -104,6 +104,8 @@ type StatusUpdater interface {
 // ReleaseConfig holds per-release status updater configuration.
 type ReleaseConfig struct {
 	StatusUpdater StatusUpdater
+	// ScrapeMetrics gates AI metrics scraping into Prometheus for this release.
+	ScrapeMetrics bool
 	Revision      int
 }
 

@@ -23,18 +23,23 @@ spec:
   # atomic: true
   # waitTimeout: 300
 
-  # 调度意图：委托 Volcano 做 gang/队列调度（不实现调度）
+  # 附加能力开关（默认均为 false，按需开启）：
+  #   1. metrics:     采集 AI 指标上报 Prometheus（带 release/revision label）
+  #   2. scheduling:  声明调度意图，委托 Volcano 做 gang/队列调度
+  #   3. verification: 部署后跑 robot 断言，结果回写 status.verification
+  #
+  # Pod 状态回写（status.podStatuses）是核心能力，始终开启，无需开关。
+
+  metrics:
+    enabled: true
+
   # scheduling:
+  #   enabled: true
   #   schedulerName: volcano
   #   podGroup:
   #     minMember: 2
   #     queue: default
 
-  # 部署后验证：跑 robot 断言，结果回写 status.verification
   # verification:
   #   enabled: true
   #   suites: [smoke, regression]
-
-  # 监控 Pod 状态并回写 status.podStatuses
-  podMonitor:
-    enabled: true

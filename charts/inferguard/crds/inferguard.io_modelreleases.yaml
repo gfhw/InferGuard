@@ -77,20 +77,23 @@ spec:
                   type: integer
                   description: Wait timeout in seconds
                   format: int64
-                podMonitor:
+                metrics:
                   type: object
-                  description: Pod monitoring configuration
+                  description: AI metrics scraping into Prometheus
                   properties:
                     enabled:
                       type: boolean
-                      description: Enable pod monitoring
+                      description: Scrape AI inference metrics from the release pods
                 scheduling:
                   type: object
                   description: AI pod scheduling intent (delegated to Volcano)
                   properties:
+                    enabled:
+                      type: boolean
+                      description: Declare scheduler intent (default volcano)
                     schedulerName:
                       type: string
-                      description: Scheduler for the release pods. Set to volcano to enable gang/queue scheduling
+                      description: Scheduler for the release pods. Defaults to volcano when enabled
                     podGroup:
                       type: object
                       description: Volcano gang scheduling configuration

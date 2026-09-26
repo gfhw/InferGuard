@@ -18,6 +18,13 @@ Helm 的 `--wait --atomic` 只管「Pod Ready 那一刻」,但 **Pod Ready ≠ �
 
 ---
 
+## 能力分层
+
+| 层级 | 能力 | 需开关 |
+|------|------|--------|
+| **核心**(始终开启) | Helm 生命周期管理、Pod 状态回写 `status.podStatuses` | 否 |
+| **附加**(默认 false) | `metrics`(AI 指标采集)、`scheduling`(火山调度)、`verification`(robot 验证) | 是 |
+
 ## 核心能力
 
 ### 1. Helm 声明式生命周期管理
@@ -119,20 +126,25 @@ spec:
   # atomic: true  # 升级失败自动回滚
   # wait: false  # 默认 true,设为 false 不等待 Pod 就绪
 
-  # 调度意图:委托 Volcano 做 gang/队列调度(不实现调度)
+  # --- 附加能力(三个开关,默认 false,按需开启)---
+  # Pod 状态回写 status.podStatuses 是核心能力,始终开启,无需开关。
+
+  # 1. AI 指标采集:上报 Prometheus,带 release/revision label
+  metrics:
+    enabled: true
+
+  # 2. 调度意图:委托 Volcano 做 gang/队列调度(不实现调度)
   scheduling:
+    enabled: true
     schedulerName: volcano
     podGroup:
       minMember: 2
       queue: default
 
-  # 部署后验证:跑 robot 断言,结果回写 status.verification
+  # 3. 部署后验证:跑 robot 断言,结果回写 status.verification
   verification:
     enabled: true
     suites: [smoke, regression]
-
-  podMonitor:
-    enabled: true
 ```
 
 ---

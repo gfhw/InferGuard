@@ -297,26 +297,20 @@ func (r *ModelReleaseReconciler) managePodMonitor(ctx context.Context, hr *helmv
 
 	key := types.NamespacedName{Namespace: hr.Namespace, Name: hr.Name}.String()
 
-	if !hr.IsPodMonitorEnabled() {
-		r.Watcher.UnregisterRelease(releaseName)
-		delete(r.releaseNames, key)
-		return nil
-	}
-
+	// Pod status write-back is always on (core capability), so register the
+	// release unconditionally. Metrics scraping is gated separately by
+	// spec.metrics.enabled.
 	r.Watcher.RegisterRelease(releaseName, &podwatch.ReleaseConfig{
 		StatusUpdater: &crStatusUpdater{
 			client:      r.Client,
 			crNamespace: hr.Namespace,
 			crName:      hr.Name,
 		},
+		ScrapeMetrics: hr.Spec.Metrics.Enabled,
 	})
 
 	r.releaseNames[key] = releaseName
 	return nil
-}
-
-func (r *ModelReleaseReconciler) unmanagePodMonitor(releaseName string) {
-	r.Watcher.UnregisterRelease(releaseName)
 }
 
 func (r *ModelReleaseReconciler) getValues(hr *helmv1alpha1.ModelRelease) (map[string]interface{}, error) {
@@ -428,9 +422,7 @@ func (r *ModelReleaseReconciler) updateStatusSuccess(ctx context.Context, hr *he
 		}
 	}
 
-	if hr.IsPodMonitorEnabled() {
-		updated.Status.PodMonitorReady = true
-	}
+	updated.Status.PodMonitorReady = true
 
 	if err := r.Status().Update(ctx, updated); err != nil {
 		return err
