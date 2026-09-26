@@ -145,6 +145,39 @@ spec:
                           alertBody:
                             type: string
                             description: Raw webhook body. Supports ${release_name} ${pod_name} ${namespace} ${pod_phase} ${pod_restart} ${pod_ip} ${inference_latency_ms} ${gpu_cache_pct}
+                scheduling:
+                  type: object
+                  description: AI pod scheduling intent (delegated to Volcano)
+                  properties:
+                    schedulerName:
+                      type: string
+                      description: Scheduler for the release pods. Set to volcano to enable gang/queue scheduling
+                    podGroup:
+                      type: object
+                      description: Volcano gang scheduling configuration
+                      properties:
+                        minMember:
+                          type: integer
+                          format: int32
+                          description: Minimum pods to schedule together
+                        queue:
+                          type: string
+                          description: Volcano queue name
+                        priorityClass:
+                          type: string
+                          description: PriorityClass for the pods
+                verification:
+                  type: object
+                  description: Post-deploy robot-framework verification
+                  properties:
+                    enabled:
+                      type: boolean
+                      description: Run robot verification after deploy/upgrade
+                    suites:
+                      type: array
+                      description: Robot suites to run (empty = default smoke)
+                      items:
+                        type: string
             status:
               description: ModelReleaseStatus defines the observed state of ModelRelease
               type: object
@@ -231,6 +264,36 @@ spec:
                         type: string
                       message:
                         type: string
+                verification:
+                  type: object
+                  description: Robot-framework verification outcome
+                  properties:
+                    phase:
+                      type: string
+                      description: Verification phase (Skipped/Pending/Verified/Degraded/Unknown)
+                    verifiedRevision:
+                      type: integer
+                      description: Revision that was verified
+                    passedCases:
+                      type: integer
+                      description: Number of passed assertions
+                    failedCases:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                          expected:
+                            type: string
+                          actual:
+                            type: string
+                    reportURL:
+                      type: string
+                      description: URL to the robot report
+                    message:
+                      type: string
+                      description: Summary message
       subresources:
         status: {}
       additionalPrinterColumns:

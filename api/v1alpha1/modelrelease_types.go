@@ -28,6 +28,12 @@ type ModelReleaseSpec struct {
 
 	// Policies: alerting rules (condition -> Webhook notification)
 	Policies []PolicySpec `json:"policies,omitempty"`
+
+	// Scheduling declares AI pod scheduling intent (delegated to Volcano).
+	Scheduling SchedulingSpec `json:"scheduling,omitempty"`
+
+	// Verification runs robot-framework assertions after deploy/upgrade.
+	Verification VerificationSpec `json:"verification,omitempty"`
 }
 
 type ChartSpec struct {
@@ -61,6 +67,73 @@ type PolicySpec struct {
 	Name      string          `json:"name"`
 	Condition PolicyCondition `json:"condition"`
 	Action    PolicyAction    `json:"action"`
+}
+
+// SchedulingSpec declares AI pod scheduling intent. The operator only expresses
+// this intent (and creates the Volcano PodGroup); the actual scheduling decision
+// is delegated to Volcano / kube-scheduler.
+type SchedulingSpec struct {
+	// SchedulerName is the scheduler for the release's pods. Empty means the
+	// cluster default scheduler. Set to "volcano" to enable gang/queue scheduling.
+	SchedulerName string `json:"schedulerName,omitempty"`
+
+	// PodGroup configures Volcano gang scheduling (only relevant when
+	// SchedulerName == "volcano").
+	PodGroup *PodGroupSpec `json:"podGroup,omitempty"`
+}
+
+type PodGroupSpec struct {
+	// MinMember is the minimum number of pods that must be scheduled together.
+	MinMember int32 `json:"minMember,omitempty"`
+	// Queue is the Volcano queue name.
+	Queue string `json:"queue,omitempty"`
+	// PriorityClass for the pods.
+	PriorityClass string `json:"priorityClass,omitempty"`
+}
+
+// VerificationSpec declares post-deploy robot-framework verification: after a
+// successful install/upgrade, the operator creates an InferenceCheck CR and
+// watches it to surface whether the model actually meets its inference SLA.
+type VerificationSpec struct {
+	// Enabled turns on post-deploy verification. When false the release is
+	// considered verified-by-default (status.verification.phase = Skipped).
+	Enabled bool `json:"enabled,omitempty"`
+	// Suites is the optional list of robot suites to run. Empty means the
+	// default smoke suite.
+	Suites []string `json:"suites,omitempty"`
+}
+
+// FailedCase records a single failed verification assertion.
+type FailedCase struct {
+	Name     string `json:"name,omitempty"`
+	Expected string `json:"expected,omitempty"`
+	Actual   string `json:"actual,omitempty"`
+}
+
+// VerificationPhase values for status.verification.phase.
+const (
+	// VerificationSkipped: verification is disabled; deploy is verified-by-default.
+	VerificationSkipped = "Skipped"
+	// VerificationPending: InferenceCheck created, robot cases not yet finished.
+	VerificationPending = "Pending"
+	// VerificationVerified: all assertions passed.
+	VerificationVerified = "Verified"
+	// VerificationDegraded: at least one assertion failed.
+	VerificationDegraded = "Degraded"
+	// VerificationUnknown: verification errored/timed out and cannot be judged.
+	VerificationUnknown = "Unknown"
+)
+
+// VerificationStatus reflects the robot-framework verification outcome for the
+// release. It is independent from status.phase (which tracks the Helm lifecycle
+// only).
+type VerificationStatus struct {
+	Phase            string       `json:"phase,omitempty"`
+	VerifiedRevision int          `json:"verifiedRevision,omitempty"`
+	PassedCases      int          `json:"passedCases,omitempty"`
+	FailedCases      []FailedCase `json:"failedCases,omitempty"`
+	ReportURL        string       `json:"reportURL,omitempty"`
+	Message          string       `json:"message,omitempty"`
 }
 
 type PodRuntimeStatus struct {
@@ -99,6 +172,10 @@ type ModelReleaseStatus struct {
 
 	// Real-time pod runtime status
 	PodStatuses []PodRuntimeStatus `json:"podStatuses,omitempty"`
+
+	// Verification reflects the robot-framework verification outcome. It is
+	// independent from Phase (which tracks the Helm lifecycle only).
+	Verification *VerificationStatus `json:"verification,omitempty"`
 }
 
 type ModelRelease struct {
@@ -164,6 +241,16 @@ func (in *ModelReleaseSpec) DeepCopyInto(out *ModelReleaseSpec) {
 		*out = make([]PolicySpec, len(*in))
 		copy(*out, *in)
 	}
+	if in.Scheduling.PodGroup != nil {
+		in, out := &in.Scheduling.PodGroup, &out.Scheduling.PodGroup
+		*out = new(PodGroupSpec)
+		**out = **in
+	}
+	if in.Verification.Suites != nil {
+		in, out := &in.Verification.Suites, &out.Verification.Suites
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 }
 
 func (in *ModelReleaseStatus) DeepCopyInto(out *ModelReleaseStatus) {
@@ -176,6 +263,21 @@ func (in *ModelReleaseStatus) DeepCopyInto(out *ModelReleaseStatus) {
 	if in.PodStatuses != nil {
 		in, out := &in.PodStatuses, &out.PodStatuses
 		*out = make([]PodRuntimeStatus, len(*in))
+		copy(*out, *in)
+	}
+	if in.Verification != nil {
+		in, out := &in.Verification, &out.Verification
+		*out = new(VerificationStatus)
+		(*in).DeepCopyInto(*out)
+	}
+}
+
+// DeepCopy is a convenience copy for VerificationStatus.
+func (in *VerificationStatus) DeepCopyInto(out *VerificationStatus) {
+	*out = *in
+	if in.FailedCases != nil {
+		in, out := &in.FailedCases, &out.FailedCases
+		*out = make([]FailedCase, len(*in))
 		copy(*out, *in)
 	}
 }
@@ -290,6 +392,16 @@ func (in *ModelRelease) GetWaitTimeout() time.Duration {
 		return 5 * time.Minute
 	}
 	return time.Duration(in.Spec.WaitTimeout) * time.Second
+}
+
+// IsVerificationEnabled reports whether post-deploy robot verification should run.
+func (in *ModelRelease) IsVerificationEnabled() bool {
+	return in.Spec.Verification.Enabled
+}
+
+// UseVolcanoScheduler reports whether the release declares Volcano scheduling.
+func (in *ModelRelease) UseVolcanoScheduler() bool {
+	return in.Spec.Scheduling.SchedulerName == "volcano"
 }
 
 // HasRetriesExhausted reports whether we should give up on this CR.
