@@ -15,11 +15,10 @@ func NewFilter(namespaces []string) *Filter {
 }
 
 func (f *Filter) ShouldMonitor(pod *corev1.Pod) bool {
-	if pod.Labels == nil {
-		return false
-	}
-
-	if _, hasInstance := pod.Labels["app.kubernetes.io/instance"]; !hasInstance {
+	// A pod is monitored iff it belongs to an identifiable release.
+	// GetReleaseName centralizes the label lookup (instance, with release
+	// fallback), so we don't duplicate the label logic here.
+	if GetReleaseName(pod) == "" {
 		return false
 	}
 
