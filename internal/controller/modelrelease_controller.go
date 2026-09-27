@@ -199,12 +199,11 @@ func (r *ModelReleaseReconciler) performInstallOrUpgrade(ctx context.Context, hr
 			inferguardlog.Info("Permanent failure detected, giving up",
 				"release", releaseName, "error", err.Error())
 			// Combine status update: set failed + mark retries exhausted.
-			updated := hr.DeepCopy()
-			updated.Status.Phase = helmv1alpha1.PhaseFailed
-			updated.Status.LastAttemptedGeneration = hr.Generation
-			updated.Status.RetryCount = helmv1alpha1.MaxTransientRetries
-			updated.Status.LastFailureMessage = err.Error()
-			r.Status().Update(ctx, updated)
+			hr.Status.Phase = helmv1alpha1.PhaseFailed
+			hr.Status.LastAttemptedGeneration = hr.Generation
+			hr.Status.RetryCount = helmv1alpha1.MaxTransientRetries
+			hr.Status.LastFailureMessage = err.Error()
+			r.Status().Update(ctx, hr)
 		} else {
 			r.updateStatusFailed(ctx, hr, err.Error())
 		}
@@ -265,6 +264,9 @@ func (r *ModelReleaseReconciler) performRollback(ctx context.Context, hr *helmv1
 	} else {
 		fresh.Spec.TargetRevision = ""
 		if rel.Chart != nil && rel.Chart.Metadata != nil {
+			if rel.Chart.Metadata.Name != "" {
+				fresh.Spec.Chart.Name = rel.Chart.Metadata.Name
+			}
 			fresh.Spec.Chart.Version = rel.Chart.Metadata.Version
 		}
 		// Sync values from the rolled-back release so CR spec matches reality.
@@ -399,55 +401,52 @@ func (r *ModelReleaseReconciler) finalizeModelRelease(ctx context.Context, hr *h
 }
 
 func (r *ModelReleaseReconciler) updateStatusPhase(ctx context.Context, hr *helmv1alpha1.ModelRelease, phase string) {
-	updated := hr.DeepCopy()
-	updated.Status.Phase = phase
-	if err := r.Status().Update(ctx, updated); err != nil {
+	hr.Status.Phase = phase
+	if err := r.Status().Update(ctx, hr); err != nil {
 		inferguardlog.ErrorE(err, "Failed to update status phase", "phase", phase)
 	}
 }
 
 func (r *ModelReleaseReconciler) updateStatusSuccess(ctx context.Context, hr *helmv1alpha1.ModelRelease, rel interface{}) error {
-	updated := hr.DeepCopy()
-	updated.Status.Phase = helmv1alpha1.PhaseRunning
-	updated.Status.ReleaseName = hr.GetReleaseName()
-	updated.Status.ReleaseStatus = "deployed"
-	updated.Status.ObservedGeneration = hr.Generation
-	updated.Status.LastAttemptedGeneration = hr.Generation
-	updated.Status.RetryCount = 0
-	updated.Status.LastFailureMessage = ""
+	hr.Status.Phase = helmv1alpha1.PhaseRunning
+	hr.Status.ReleaseName = hr.GetReleaseName()
+	hr.Status.ReleaseStatus = "deployed"
+	hr.Status.ObservedGeneration = hr.Generation
+	hr.Status.LastAttemptedGeneration = hr.Generation
+	hr.Status.RetryCount = 0
+	hr.Status.LastFailureMessage = ""
 	now := metav1.Now()
-	updated.Status.LastAppliedTime = &now
+	hr.Status.LastAppliedTime = &now
 
 	if release, ok := rel.(*helmrelease.Release); ok {
-		updated.Status.Revision = release.Version
-		updated.Status.ReleaseVersion = release.Version
+		hr.Status.Revision = release.Version
+		hr.Status.ReleaseVersion = release.Version
 		if hr.Spec.TargetRevision != "" {
 			// Rollback: record the user-requested target so a repeat reconcile
 			// (e.g. after spec alignment fails) won't roll back again.
-			updated.Status.LastTargetRevision = hr.Spec.TargetRevision
+			hr.Status.LastTargetRevision = hr.Spec.TargetRevision
 		} else {
-			updated.Status.LastTargetRevision = fmt.Sprintf("%d", release.Version)
+			hr.Status.LastTargetRevision = fmt.Sprintf("%d", release.Version)
 		}
 		if release.Info != nil {
-			updated.Status.Notes = release.Info.Notes
+			hr.Status.Notes = release.Info.Notes
 		}
 	}
 
-	updated.Status.PodMonitorReady = true
+	hr.Status.PodMonitorReady = true
 
-	if err := r.Status().Update(ctx, updated); err != nil {
+	if err := r.Status().Update(ctx, hr); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (r *ModelReleaseReconciler) updateStatusFailed(ctx context.Context, hr *helmv1alpha1.ModelRelease, message string) {
-	updated := hr.DeepCopy()
-	updated.Status.Phase = helmv1alpha1.PhaseFailed
-	updated.Status.LastAttemptedGeneration = hr.Generation
-	updated.Status.RetryCount = hr.Status.RetryCount + 1
-	updated.Status.LastFailureMessage = message
-	if err := r.Status().Update(ctx, updated); err != nil {
+	hr.Status.Phase = helmv1alpha1.PhaseFailed
+	hr.Status.LastAttemptedGeneration = hr.Generation
+	hr.Status.RetryCount = hr.Status.RetryCount + 1
+	hr.Status.LastFailureMessage = message
+	if err := r.Status().Update(ctx, hr); err != nil {
 		inferguardlog.ErrorE(err, "Failed to update status")
 	}
 }
