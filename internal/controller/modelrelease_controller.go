@@ -230,7 +230,12 @@ func (r *ModelReleaseReconciler) performInstallOrUpgrade(ctx context.Context, hr
 func (r *ModelReleaseReconciler) performRollback(ctx context.Context, hr *helmv1alpha1.ModelRelease) error {
 	releaseName := hr.GetReleaseName()
 	releaseNs := hr.GetReleaseNamespace()
-	targetRevision := hr.GetTargetRevision()
+
+	targetRevision, err := hr.GetTargetRevision()
+	if err != nil {
+		r.updateStatusFailed(ctx, hr, err.Error())
+		return err
+	}
 
 	inferguardlog.Info("Performing rollback",
 		"release", releaseName, "namespace", releaseNs, "targetRevision", targetRevision)
@@ -416,7 +421,13 @@ func (r *ModelReleaseReconciler) updateStatusSuccess(ctx context.Context, hr *he
 	if release, ok := rel.(*helmrelease.Release); ok {
 		updated.Status.Revision = release.Version
 		updated.Status.ReleaseVersion = release.Version
-		updated.Status.LastTargetRevision = fmt.Sprintf("%d", release.Version)
+		if hr.Spec.TargetRevision != "" {
+			// Rollback: record the user-requested target so a repeat reconcile
+			// (e.g. after spec alignment fails) won't roll back again.
+			updated.Status.LastTargetRevision = hr.Spec.TargetRevision
+		} else {
+			updated.Status.LastTargetRevision = fmt.Sprintf("%d", release.Version)
+		}
 		if release.Info != nil {
 			updated.Status.Notes = release.Info.Notes
 		}

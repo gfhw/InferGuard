@@ -308,16 +308,27 @@ func (in *ModelRelease) GetReleaseName() string {
 }
 
 func (in *ModelRelease) ShouldRollback() bool {
-	return in.Spec.TargetRevision != "" && in.Spec.TargetRevision != fmt.Sprintf("%d", in.Status.Revision)
+	if in.Spec.TargetRevision == "" {
+		return false
+	}
+	// Compare against LastTargetRevision, not Status.Revision: a Helm rollback
+	// creates a NEW revision (carrying the target's content), so Status.Revision
+	// changes after rollback. Comparing against LastTargetRevision makes the
+	// check idempotent — if spec alignment fails to clear targetRevision, the
+	// next reconcile won't roll back again in an infinite loop.
+	return in.Spec.TargetRevision != in.Status.LastTargetRevision
 }
 
-func (in *ModelRelease) GetTargetRevision() int {
+func (in *ModelRelease) GetTargetRevision() (int, error) {
 	if in.Spec.TargetRevision == "" {
-		return 0
+		return 0, nil
 	}
 	var rev int
-	fmt.Sscanf(in.Spec.TargetRevision, "%d", &rev)
-	return rev
+	n, err := fmt.Sscanf(in.Spec.TargetRevision, "%d", &rev)
+	if err != nil || n != 1 || rev <= 0 {
+		return 0, fmt.Errorf("invalid targetRevision %q: must be a positive integer", in.Spec.TargetRevision)
+	}
+	return rev, nil
 }
 
 func (in *ModelRelease) ShouldForceUpgrade() bool {
