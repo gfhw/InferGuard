@@ -363,6 +363,15 @@ func (in *ModelRelease) UseVolcanoScheduler() bool {
 	return in.Spec.Scheduling.Enabled
 }
 
+// GetSchedulerName returns the scheduler declared for the release's pods,
+// defaulting to "volcano".
+func (in *ModelRelease) GetSchedulerName() string {
+	if in.Spec.Scheduling.SchedulerName != "" {
+		return in.Spec.Scheduling.SchedulerName
+	}
+	return "volcano"
+}
+
 // HasRetriesExhausted reports whether we should give up on this CR.
 //
 // Retries are scoped to one spec generation: once the user edits the spec

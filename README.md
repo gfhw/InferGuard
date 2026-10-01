@@ -54,6 +54,12 @@ Prometheus 每次 scrape 时,Collector **现场** HTTP GET 每个推理 Pod 的 
 
 > **告警交给谁**:运行期的持续阈值监控交给 Prometheus alerting rules + Alertmanager(支持 `for` 抖动免疫、分组、静默、路由)。InferGuard 只负责把 AI 指标**采集出来并关联 revision**,不抢告警的活。
 
+### 4. 火山调度委托
+
+`spec.scheduling.enabled` 开启后,operator 在部署前**创建 Volcano PodGroup**,并把 `schedulerName` / `podGroupName` 注入 values,把 gang/队列调度**委托给 Volcano**。InferGuard 只声明意图、创建 PodGroup,**不实现调度算法**——调度是集群控制平面的职责,不是应用控制器的职责。
+
+> chart 模板需通过 `.Values.schedulerName`(Pod 的 `schedulerName` 字段)和 `.Values.podGroupName`(Pod 的 `scheduling.k8s.io/group-name` annotation)接入。
+
 ---
 
 ## 规划中的能力
@@ -78,10 +84,6 @@ helm 部署成功 → 创建 InferenceCheck CR → robot operator 起 Job 跑 Ro
 | Unknown | 验证出错/超时,无法判定 |
 
 **分层定位**:探针管"就绪"(进程/服务活着),robot 验证管"质量验收"(TTFT/吞吐/KV-cache 定量断言 + 升级回归),两者互补。
-
-### 火山调度委托
-
-`spec.scheduling` 声明 AI Pod 的调度意图(`schedulerName: volcano` + `podGroup` 的 gang 调度配置)。**InferGuard 只声明意图、创建 PodGroup 委托给 Volcano,不实现调度算法**——调度是集群控制平面的职责,不是应用控制器的职责。
 
 ---
 

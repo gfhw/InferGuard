@@ -9,7 +9,9 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/client-go/kubernetes"
@@ -175,6 +177,18 @@ func (r *ModelReleaseReconciler) performInstallOrUpgrade(ctx context.Context, hr
 		return err
 	}
 
+	// Declare scheduling intent to Volcano: inject schedulerName/podGroupName
+	// into values (chart templates opt in via .Values.schedulerName / .Values.podGroupName)
+	// and create/update the Volcano PodGroup before pods are created.
+	if hr.UseVolcanoScheduler() {
+		values["schedulerName"] = hr.GetSchedulerName()
+		values["podGroupName"] = hr.GetReleaseName()
+		if err := r.ensurePodGroup(ctx, hr); err != nil {
+			r.updateStatusFailed(ctx, hr, "failed to ensure pod group: "+err.Error())
+			return err
+		}
+	}
+
 	existing, err := r.HelmManager.GetRelease(releaseName, releaseNs)
 	if err != nil && !errors.Is(err, helm.ErrReleaseNotFound) {
 		r.updateStatusFailed(ctx, hr, "failed to query release: "+err.Error())
@@ -224,6 +238,52 @@ func (r *ModelReleaseReconciler) performInstallOrUpgrade(ctx context.Context, hr
 		r.Watcher.UpdateReleaseRevision(hr.GetReleaseName(), rel.Version)
 	}
 	return nil
+}
+
+// ensurePodGroup creates or updates the Volcano PodGroup for a release. The
+// PodGroup name must match the value injected into the pods via the
+// scheduling.k8s.io/group-name annotation (which chart templates opt into via
+// .Values.podGroupName). We only declare the intent here; Volcano does the
+// actual gang/queue scheduling.
+func (r *ModelReleaseReconciler) ensurePodGroup(ctx context.Context, hr *helmv1alpha1.ModelRelease) error {
+	releaseName := hr.GetReleaseName()
+	namespace := hr.GetReleaseNamespace()
+
+	pg := &unstructured.Unstructured{}
+	pg.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "scheduling.volcano.sh",
+		Version: "v1beta1",
+		Kind:    "PodGroup",
+	})
+	pg.SetName(releaseName)
+	pg.SetNamespace(namespace)
+
+	spec := map[string]interface{}{}
+	if hr.Spec.Scheduling.PodGroup != nil {
+		if hr.Spec.Scheduling.PodGroup.MinMember > 0 {
+			spec["minMember"] = hr.Spec.Scheduling.PodGroup.MinMember
+		}
+		if hr.Spec.Scheduling.PodGroup.Queue != "" {
+			spec["queue"] = hr.Spec.Scheduling.PodGroup.Queue
+		}
+		if hr.Spec.Scheduling.PodGroup.PriorityClass != "" {
+			spec["priorityClassName"] = hr.Spec.Scheduling.PodGroup.PriorityClass
+		}
+	}
+	pg.Object["spec"] = spec
+
+	existing := &unstructured.Unstructured{}
+	existing.SetGroupVersionKind(pg.GroupVersionKind())
+	err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: releaseName}, existing)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return r.Create(ctx, pg)
+		}
+		return err
+	}
+
+	existing.Object["spec"] = spec
+	return r.Update(ctx, existing)
 }
 
 func (r *ModelReleaseReconciler) performRollback(ctx context.Context, hr *helmv1alpha1.ModelRelease) error {
