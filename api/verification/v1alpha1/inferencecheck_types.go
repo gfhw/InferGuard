@@ -23,19 +23,23 @@ type InferenceCheckSpec struct {
 	Thresholds map[string]int32 `json:"thresholds,omitempty"`
 }
 
-// FailedCase records a single failed verification assertion.
+// FailedCase records a single failed verification assertion with its
+// structured expected vs actual values (parsed from the keyword message).
 type FailedCase struct {
-	Name    string `json:"name,omitempty"`
-	Message string `json:"message,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Message  string `json:"message,omitempty"`
+	Expected string `json:"expected,omitempty"`
+	Actual   string `json:"actual,omitempty"`
 }
 
 // InferenceCheckStatus mirrors InferVerify's status output.
 type InferenceCheckStatus struct {
-	Phase       string       `json:"phase,omitempty"`
-	PassedCases int          `json:"passedCases,omitempty"`
-	FailedCases []FailedCase `json:"failedCases,omitempty"`
-	ReportURL   string       `json:"reportURL,omitempty"`
-	Message     string       `json:"message,omitempty"`
+	Phase       string            `json:"phase,omitempty"`
+	PassedCases int               `json:"passedCases,omitempty"`
+	FailedCases []FailedCase      `json:"failedCases,omitempty"`
+	Progress    map[string]string `json:"progress,omitempty"`
+	ReportURL   string            `json:"reportURL,omitempty"`
+	Message     string            `json:"message,omitempty"`
 }
 
 type InferenceCheck struct {
@@ -104,6 +108,13 @@ func (in *InferenceCheckStatus) DeepCopyInto(out *InferenceCheckStatus) {
 		in, out := &in.FailedCases, &out.FailedCases
 		*out = make([]FailedCase, len(*in))
 		copy(*out, *in)
+	}
+	if in.Progress != nil {
+		in, out := &in.Progress, &out.Progress
+		*out = make(map[string]string, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
 	}
 }
 
