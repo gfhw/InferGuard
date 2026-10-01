@@ -7,6 +7,14 @@ import (
 
 // InferenceCheckSpec declares a robot-framework verification run for an AI
 // inference release. InferGuard creates one after a successful deploy/upgrade;
+// ApprovalSpec declares a human approval gate for passing verifications.
+type ApprovalSpec struct {
+	// Required makes a passing verification wait for human sign-off.
+	Required bool `json:"required,omitempty"`
+	// Approved is flipped to true by the user to sign off.
+	Approved bool `json:"approved,omitempty"`
+}
+
 // InferVerify executes it and writes back status.
 type InferenceCheckSpec struct {
 	// ReleaseRef is the ModelRelease this check verifies.
@@ -21,6 +29,8 @@ type InferenceCheckSpec struct {
 	Suites []string `json:"suites,omitempty"`
 	// Thresholds are assertion thresholds passed to the suites as variables.
 	Thresholds map[string]int32 `json:"thresholds,omitempty"`
+	// Approval gates a passing verification on human sign-off.
+	Approval *ApprovalSpec `json:"approval,omitempty"`
 }
 
 // FailedCase records a single failed verification assertion with its
@@ -99,6 +109,11 @@ func (in *InferenceCheckSpec) DeepCopyInto(out *InferenceCheckSpec) {
 		for key, val := range *in {
 			(*out)[key] = val
 		}
+	}
+	if in.Approval != nil {
+		in, out := &in.Approval, &out.Approval
+		*out = new(ApprovalSpec)
+		**out = **in
 	}
 }
 
