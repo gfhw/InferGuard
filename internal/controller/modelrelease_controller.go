@@ -19,9 +19,12 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	ctrlLog "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	helmv1alpha1 "github.com/gfhw/inferguard/api/v1alpha1"
+	verificationv1alpha1 "github.com/gfhw/inferguard/api/verification/v1alpha1"
 	"github.com/gfhw/inferguard/internal/helm"
 	inferguardlog "github.com/gfhw/inferguard/pkg/log"
 	"github.com/gfhw/inferguard/pkg/podwatch"
@@ -118,6 +121,11 @@ func (r *ModelReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Stable: spec unchanged and already Running — nothing to do.
 	if hr.IsStable() {
+		// Still reflect any InferenceCheck outcome before returning, so the
+		// verification status keeps converging even on a stable release.
+		if err := r.reconcileVerification(ctx, hr); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, nil
 	}
 
@@ -236,6 +244,9 @@ func (r *ModelReleaseReconciler) performInstallOrUpgrade(ctx context.Context, hr
 	}
 	if rel != nil {
 		r.Watcher.UpdateReleaseRevision(hr.GetReleaseName(), rel.Version)
+		if err := r.ensureInferenceCheck(ctx, hr, rel.Version); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -284,6 +295,88 @@ func (r *ModelReleaseReconciler) ensurePodGroup(ctx context.Context, hr *helmv1a
 
 	existing.Object["spec"] = spec
 	return r.Update(ctx, existing)
+}
+
+// ensureInferenceCheck creates or updates the InferenceCheck CR that triggers
+// InferVerify (the robot-framework operator) to verify this release.
+func (r *ModelReleaseReconciler) ensureInferenceCheck(ctx context.Context, hr *helmv1alpha1.ModelRelease, revision int) error {
+	if !hr.IsVerificationEnabled() {
+		return nil
+	}
+
+	target := hr.Spec.Verification.Target
+	if target == "" {
+		target = fmt.Sprintf("http://%s.%s.svc:8000", hr.GetReleaseName(), hr.GetReleaseNamespace())
+	}
+
+	spec := verificationv1alpha1.InferenceCheckSpec{
+		ReleaseRef: hr.Name,
+		Revision:   revision,
+		Target:     target,
+		Suites:     hr.Spec.Verification.Suites,
+		Thresholds: hr.Spec.Verification.Thresholds,
+	}
+
+	check := &verificationv1alpha1.InferenceCheck{}
+	err := r.Get(ctx, types.NamespacedName{Namespace: hr.Namespace, Name: hr.Name}, check)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			check = &verificationv1alpha1.InferenceCheck{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      hr.Name,
+					Namespace: hr.Namespace,
+				},
+				Spec: spec,
+			}
+			return r.Create(ctx, check)
+		}
+		return err
+	}
+
+	check.Spec = spec
+	return r.Update(ctx, check)
+}
+
+// reconcileVerification reflects the InferenceCheck outcome back into
+// ModelRelease.status.verification.
+func (r *ModelReleaseReconciler) reconcileVerification(ctx context.Context, hr *helmv1alpha1.ModelRelease) error {
+	if !hr.IsVerificationEnabled() {
+		if hr.Status.Verification == nil || hr.Status.Verification.Phase != helmv1alpha1.VerificationSkipped {
+			hr.Status.Verification = &helmv1alpha1.VerificationStatus{Phase: helmv1alpha1.VerificationSkipped}
+			return r.Status().Update(ctx, hr)
+		}
+		return nil
+	}
+
+	check := &verificationv1alpha1.InferenceCheck{}
+	err := r.Get(ctx, types.NamespacedName{Namespace: hr.Namespace, Name: hr.Name}, check)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil // not created yet
+		}
+		return err
+	}
+
+	verification := &helmv1alpha1.VerificationStatus{
+		Phase:            check.Status.Phase,
+		VerifiedRevision: check.Spec.Revision,
+		PassedCases:      check.Status.PassedCases,
+		ReportURL:        check.Status.ReportURL,
+		Message:          check.Status.Message,
+	}
+	for _, fc := range check.Status.FailedCases {
+		verification.FailedCases = append(verification.FailedCases, helmv1alpha1.FailedCase{
+			Name:   fc.Name,
+			Actual: fc.Message,
+		})
+	}
+
+	// Only write back when the phase actually changed, to avoid status churn.
+	if hr.Status.Verification == nil || hr.Status.Verification.Phase != verification.Phase {
+		hr.Status.Verification = verification
+		return r.Status().Update(ctx, hr)
+	}
+	return nil
 }
 
 func (r *ModelReleaseReconciler) performRollback(ctx context.Context, hr *helmv1alpha1.ModelRelease) error {
@@ -355,6 +448,9 @@ func (r *ModelReleaseReconciler) performRollback(ctx context.Context, hr *helmv1
 	}
 	if rel != nil {
 		r.Watcher.UpdateReleaseRevision(hr.GetReleaseName(), rel.Version)
+		if err := r.ensureInferenceCheck(ctx, hr, rel.Version); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -514,7 +610,23 @@ func (r *ModelReleaseReconciler) updateStatusFailed(ctx context.Context, hr *hel
 func (r *ModelReleaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&helmv1alpha1.ModelRelease{}).
+		Watches(&verificationv1alpha1.InferenceCheck{}, handler.EnqueueRequestsFromMapFunc(r.mapInferenceCheckToModelRelease)).
 		Complete(r)
+}
+
+// mapInferenceCheckToModelRelease maps an InferenceCheck back to the ModelRelease
+// it verifies. The check's spec.releaseRef holds the ModelRelease name.
+func (r *ModelReleaseReconciler) mapInferenceCheckToModelRelease(_ context.Context, obj client.Object) []reconcile.Request {
+	check, ok := obj.(*verificationv1alpha1.InferenceCheck)
+	if !ok {
+		return nil
+	}
+	if check.Spec.ReleaseRef == "" {
+		return nil
+	}
+	return []reconcile.Request{
+		{NamespacedName: types.NamespacedName{Namespace: check.Namespace, Name: check.Spec.ReleaseRef}},
+	}
 }
 
 // crStatusUpdater implements podwatch.StatusUpdater to write pod status back to the CR

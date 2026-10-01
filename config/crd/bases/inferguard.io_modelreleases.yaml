@@ -120,6 +120,13 @@ spec:
                       description: Robot suites to run (empty = default smoke)
                       items:
                         type: string
+                    target:
+                      type: string
+                      description: Inference service URL (defaults to http://<release>.<ns>.svc:8000)
+                    thresholds:
+                      type: object
+                      description: Assertion thresholds passed to the suites as variables
+                      x-kubernetes-preserve-unknown-fields: true
             status:
               description: ModelReleaseStatus defines the observed state of ModelRelease
               type: object

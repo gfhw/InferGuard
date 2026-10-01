@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	helmv1alpha1 "github.com/gfhw/inferguard/api/v1alpha1"
+	verificationv1alpha1 "github.com/gfhw/inferguard/api/verification/v1alpha1"
 	"github.com/gfhw/inferguard/internal/controller"
 	"github.com/gfhw/inferguard/pkg/podwatch"
 )
@@ -27,6 +28,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(helmv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(verificationv1alpha1.AddToScheme(scheme))
 }
 
 func main() {

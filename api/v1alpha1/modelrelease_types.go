@@ -83,6 +83,12 @@ type VerificationSpec struct {
 	// Suites is the optional list of robot suites to run. Empty means the
 	// default smoke suite.
 	Suites []string `json:"suites,omitempty"`
+	// Target is the inference service URL (e.g. http://llama-3-8b.prod:8000).
+	// Defaults to http://<releaseName>.<namespace>.svc:8000 when empty.
+	Target string `json:"target,omitempty"`
+	// Thresholds are assertion thresholds passed to the robot suites as
+	// variables, e.g. ttftP99Ms: 5000.
+	Thresholds map[string]int32 `json:"thresholds,omitempty"`
 }
 
 // FailedCase records a single failed verification assertion.
@@ -220,6 +226,13 @@ func (in *ModelReleaseSpec) DeepCopyInto(out *ModelReleaseSpec) {
 		in, out := &in.Verification.Suites, &out.Verification.Suites
 		*out = make([]string, len(*in))
 		copy(*out, *in)
+	}
+	if in.Verification.Thresholds != nil {
+		in, out := &in.Verification.Thresholds, &out.Verification.Thresholds
+		*out = make(map[string]int32, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
 	}
 }
 
