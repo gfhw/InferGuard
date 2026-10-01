@@ -315,6 +315,7 @@ func (r *ModelReleaseReconciler) ensureInferenceCheck(ctx context.Context, hr *h
 		Target:     target,
 		Suites:     hr.Spec.Verification.Suites,
 		Thresholds: hr.Spec.Verification.Thresholds,
+		Interval:   hr.Spec.Verification.Interval,
 	}
 
 	check := &verificationv1alpha1.InferenceCheck{}

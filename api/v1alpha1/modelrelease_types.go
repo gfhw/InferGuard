@@ -89,6 +89,9 @@ type VerificationSpec struct {
 	// Thresholds are assertion thresholds passed to the robot suites as
 	// variables, e.g. ttftP99Ms: 5000.
 	Thresholds map[string]int32 `json:"thresholds,omitempty"`
+	// Interval enables runtime assurance: re-run verification every interval
+	// (e.g. "6h") while the release runs. Empty = verify once after deploy.
+	Interval string `json:"interval,omitempty"`
 }
 
 // FailedCase records a single failed verification assertion.

@@ -31,6 +31,9 @@ type InferenceCheckSpec struct {
 	Thresholds map[string]int32 `json:"thresholds,omitempty"`
 	// Approval gates a passing verification on human sign-off.
 	Approval *ApprovalSpec `json:"approval,omitempty"`
+	// Interval enables runtime assurance: re-run verification every interval
+	// (e.g. "6h") while the release runs. Empty = verify once after deploy.
+	Interval string `json:"interval,omitempty"`
 }
 
 // FailedCase records a single failed verification assertion with its

@@ -127,6 +127,9 @@ spec:
                       type: object
                       description: Assertion thresholds passed to the suites as variables
                       x-kubernetes-preserve-unknown-fields: true
+                    interval:
+                      type: string
+                      description: Runtime assurance interval (e.g. "6h"). Empty = verify once after deploy.
             status:
               description: ModelReleaseStatus defines the observed state of ModelRelease
               type: object
