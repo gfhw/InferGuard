@@ -14,7 +14,9 @@ Kubernetes 上部署 AI 推理模型不仅仅是 `helm install`。模型 Pod 要
 
 Helm 的 `--wait --atomic` 只管「Pod Ready 那一刻」,但 **Pod Ready ≠ 模型真的能推理**——探针只能回答"进程还活着吗"(布尔),回答不了"推理质量达标吗"(定量 SLA)。
 
-**InferGuard 聚焦的正是这个缝隙**:把 Helm 拉进 Kubernetes 的 Reconcile 循环,让 Helm Release 像 Deployment 一样具备声明式管理能力;同时把**部署版本(revision)**与**推理指标**、**验证结果**关联起来,回答"这次升级有没有劣化"。
+**InferGuard 聚焦"部署侧"这个缝隙**:把 Helm 拉进 Kubernetes 的 Reconcile 循环,让 Helm Release 像 Deployment 一样具备声明式管理能力;同时把**部署版本(revision)**与**推理指标**、**验证结果**关联起来,回答"这次升级有没有劣化"。
+
+与 [InferVerify](../InferVerify) 是**平等的两个平台,通过 CR 协作**:InferGuard 负责"部署",InferVerify 负责"验证"。InferGuard 部署成功后创建 `InferenceCheck` CR 触发验证,并 watch 结果回写到 `status.verification`。
 
 ---
 
@@ -23,7 +25,7 @@ Helm 的 `--wait --atomic` 只管「Pod Ready 那一刻」,但 **Pod Ready ≠ �
 | 层级 | 能力 | 需开关 |
 |------|------|--------|
 | **核心**(始终开启) | Helm 生命周期管理、Pod 状态回写 `status.podStatuses` | 否 |
-| **附加**(默认 false) | `metrics`(AI 指标采集)、`scheduling`(火山调度)、`verification`(robot 验证) | 是 |
+| **附加**(默认 false) | `metrics`(AI 指标采集)、`scheduling`(火山调度)、`verification`(robot 验证联动) | 是 |
 
 ## 核心能力
 
@@ -60,17 +62,13 @@ Prometheus 每次 scrape 时,Collector **现场** HTTP GET 每个推理 Pod 的 
 
 > chart 模板需通过 `.Values.schedulerName`(Pod 的 `schedulerName` 字段)和 `.Values.podGroupName`(Pod 的 `scheduling.k8s.io/group-name` annotation)接入。
 
----
+### 5. 部署后验证联动(robot 验证)
 
-## 规划中的能力
-
-### 部署后验证闭环(robot operator)
-
-> 字段与状态机已定义,逻辑待接线(配合独立的 robot operator)。
+`spec.verification.enabled` 开启后,部署/回滚成功后 operator 创建 `InferenceCheck` CR,委托 [InferVerify](../InferVerify) 跑 robot 断言;并通过 controller-runtime `Watches` **实时 watch** InferenceCheck 结果,回写 `status.verification`。
 
 ```
-helm 部署成功 → 创建 InferenceCheck CR → robot operator 起 Job 跑 Robot 断言
-→ 回写 verified/degraded → InferGuard watch 并写回 status.verification
+helm 部署成功 → 创建 InferenceCheck CR → InferVerify 起 Job 跑 Robot 断言
+→ 回写 Verified/Degraded → InferGuard watch 并实时回写 status.verification
 ```
 
 `status.verification.phase` 独立于 `status.phase`(后者只表达 Helm 生命周期),取值:
@@ -81,9 +79,10 @@ helm 部署成功 → 创建 InferenceCheck CR → robot operator 起 Job 跑 Ro
 | Pending | 验证 CR 已创建,用例未跑完 |
 | Verified | 全部断言通过 |
 | Degraded | 有断言失败 |
+| PendingApproval | 验证通过但等待人工批准(approval.required) |
 | Unknown | 验证出错/超时,无法判定 |
 
-**分层定位**:探针管"就绪"(进程/服务活着),robot 验证管"质量验收"(TTFT/吞吐/KV-cache 定量断言 + 升级回归),两者互补。
+**分层定位**:探针管"就绪"(进程/服务活着),robot 验证管"质量验收"(TTFT/吞吐/KV-cache 定量断言 + 升级回归),两者互补。验证支持 `interval` 定时重跑(运行保障)和 `approval` 人工批准门禁——劣化时 `phase` 变为 `Degraded`,用户据此决定是否回滚(设置 `targetRevision`)。
 
 ---
 
@@ -94,6 +93,7 @@ ModelRelease CR ---> Controller (Reconcile)
                        +-- Helm SDK: install/upgrade/rollback/uninstall
                        +-- 错误分类 + 指数退避 + generation 感知 retry
                        +-- 声明调度意图(scheduling)/ 验证意图(verification)
+                       +-- 创建 InferenceCheck CR + watch 回写 status.verification
 
 SharedInformer (watch Helm Pods)
   +-- PodEventQueue(UID 去重 + 类型升级合并)
@@ -143,10 +143,15 @@ spec:
       minMember: 2
       queue: default
 
-  # 3. 部署后验证:跑 robot 断言,结果回写 status.verification
+  # 3. 部署后验证:委托 InferVerify 跑 robot 断言,结果回写 status.verification
   verification:
     enabled: true
     suites: [smoke, regression]
+    target: http://llama-3-8b.production.svc:8000   # 缺省 http://<release>.<ns>.svc:8000
+    interval: "6h"                                   # 运行保障:每 6h 重跑(缺省只部署时一次)
+    thresholds:
+      ttftP99Ms: 5000
+      kvCachePercent: 90
 ```
 
 ---
@@ -180,6 +185,7 @@ spec:
 | **回滚后全量对齐 spec** | 回滚后同步 chart.version + values,避免 spec 与实际状态脱节 |
 | **operator 不抢告警的活** | 通用 Pod 告警交给 kube-state-metrics,持续阈值交给 Alertmanager;operator 聚焦版本画像 + 验证闭环 |
 | **调度只声明不实现** | 调度是控制平面职责,operator 声明意图 + 创建 PodGroup 委托 Volcano |
+| **验证委托不内嵌** | 验证交给独立的 InferVerify(CR 协作),InferGuard 只创建 CR + watch 回写,职责单一 |
 | **探针 vs robot 分层** | 探针判"就绪"(布尔),robot 判"质量验收"(定量 SLA + 回归),两者互补 |
 
 ---
@@ -209,11 +215,12 @@ curl http://localhost:8080/metrics | grep inferguard_
 ## 项目结构
 
 ```
-+-- api/v1alpha1/             # CRD 定义(ModelRelease + 调度/验证字段)
++-- api/v1alpha1/             # ModelRelease CRD 定义
++-- api/verification/v1alpha1/# InferenceCheck 类型(联动 InferVerify)
 +-- cmd/manager/              # Operator 入口
 +-- config/                   # CRD / RBAC / Prometheus / 样本
 +-- internal/
-|   +-- controller/           # Reconcile 控制器(Helm 生命周期)
+|   +-- controller/           # Reconcile 控制器(Helm 生命周期 + 验证联动)
 |   +-- helm/                 # Helm SDK 封装
 +-- pkg/
     +-- podwatch/             # Pod 监控子系统
@@ -233,6 +240,8 @@ curl http://localhost:8080/metrics | grep inferguard_
 - Go 1.21+
 - Kubernetes 1.28+
 - Helm 3.14+
+- (可选)Volcano —— 启用 `scheduling` 时
+- (可选)InferVerify —— 启用 `verification` 时
 
 推理引擎 Prometheus 指标兼容性:
 - vLLM: 全支持(9 项指标)
